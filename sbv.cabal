@@ -410,7 +410,7 @@ Benchmark SBVBench
                     TypeApplications
   Build-depends : base >= 4.11, filepath, syb, crackNum >= 2.3
                 , sbv, directory, random, mtl, containers
-                , criterion
+                , criterion, process
   Hs-Source-Dirs  : SBVBenchSuite
   main-is         : SBVBench.hs
   Other-modules   : Utils.SBVBenchFramework
