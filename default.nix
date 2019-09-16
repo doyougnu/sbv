@@ -21,8 +21,8 @@ mkDerivation {
   ];
   testSystemDepends = [ z3 ];
   benchmarkHaskellDepends = [
-    base containers crackNum criterion directory filepath mtl process
-    random syb
+    base containers crackNum criterion deepseq directory filepath mtl
+    process random syb
   ];
   homepage = "http://leventerkok.github.com/sbv/";
   description = "SMT Based Verification: Symbolic Haskell theorem prover using SMT solving";
