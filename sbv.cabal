@@ -414,4 +414,6 @@ Benchmark SBVBench
   Hs-Source-Dirs  : SBVBenchSuite
   main-is         : SBVBench.hs
   Other-modules   : Utils.SBVBenchFramework
-                  , BenchSuite.Batch.SBVOverhead
+                  , BenchSuite.Overhead.SBVOverhead
+                  , BenchSuite.Puzzles.Coins
+                  , BenchSuite.Puzzles.NQueens
