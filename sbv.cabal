@@ -415,5 +415,15 @@ Benchmark SBVBench
   main-is         : SBVBench.hs
   Other-modules   : Utils.SBVBenchFramework
                   , BenchSuite.Overhead.SBVOverhead
+                  , BenchSuite.Puzzles.Birthday
                   , BenchSuite.Puzzles.Coins
+                  , BenchSuite.Puzzles.Counts
+                  , BenchSuite.Puzzles.DogCatMouse
+                  , BenchSuite.Puzzles.Euler185
+                  , BenchSuite.Puzzles.Garden
+                  , BenchSuite.Puzzles.LadyAndTigers
+                  , BenchSuite.Puzzles.MagicSquare
                   , BenchSuite.Puzzles.NQueens
+                  , BenchSuite.Puzzles.SendMoreMoney
+                  , BenchSuite.Puzzles.Sudoku
+                  , BenchSuite.Puzzles.U2Bridge
