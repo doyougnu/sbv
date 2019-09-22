@@ -10,22 +10,24 @@
 -----------------------------------------------------------------------------
 
 {-# OPTIONS_GHC -Wall -Werror #-}
-{-# LANGUAGE CPP              #-}
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE CPP                    #-}
+{-# LANGUAGE FlexibleContexts       #-}
+{-# LANGUAGE FlexibleInstances      #-}
 
 module BenchSuite.Overhead.SBVOverhead
-  ( mkOverheadBenchMark
+  ( mkSatOverheadBenchMark
+  , mkPveOverheadBenchMark
   , mkOverheadBenchMark'
   ) where
 
+import           Control.DeepSeq         (NFData)
 import           System.Directory        (getCurrentDirectory)
 import           System.IO
 
 import           Criterion.Main
 
-import qualified Data.SBV                as S
 import qualified System.Process          as P
-import           Utils.SBVBenchFramework
+import qualified Utils.SBVBenchFramework as U
 
 -- | The problem to benchmark, rendered as a file to input into solvers via the
 -- shell and not sbv
@@ -33,7 +35,14 @@ type Problem = FilePath
 
 -- | A bench unit is a solver and a problem that represents an input problem
 -- for the solver to solve
-type BenchUnit = (S.SMTConfig, Problem)
+type BenchUnit = (U.SMTConfig, Problem)
+
+-- | A runner is either 'Data.SBV.proveWith' or 'Data.SBV.satWith'. Where "a" is
+-- the problem sent to the solver and "b" is the return type. This could be a
+-- type class but I don't expect these to change and this is pretty simple. We
+-- require a runner in order to generate a 'Data.SBV.transcript' and then to run
+-- the actual benchmark.
+type Runner a b = (U.SMTConfig -> a -> IO b)
 
 -- | Filepath to /dev/null
 devNull :: FilePath
@@ -53,19 +62,19 @@ runStandaloneSolver (slvr, fname) =
   (\h -> do (_,_,_,ph) <- P.createProcess (P.shell command){P.std_out = P.UseHandle h}
             _ <- P.waitForProcess ph
             return ())
-  where command = mkExecString slvr fname
+  where command = U.mkExecString slvr fname
 
 -- | Given a file name, a solver config, and a problem to solve, create an
 -- environment for the criterion benchmark by generating a transcript file
-standaloneEnv :: S.Provable a => S.SMTConfig -> a -> IO FilePath -> IO BenchUnit
-standaloneEnv slvr problems f = f >>= go problems
+standaloneEnv :: Runner a b -> U.SMTConfig -> a -> IO FilePath -> IO BenchUnit
+standaloneEnv runner c problems f = f >>= go problems
   where
     -- for each symbolic bench unit, generate a transcript for the unit
-    go :: S.Provable a => a -> FilePath -> IO BenchUnit
+    -- go :: U.Provable a => a -> FilePath -> IO BenchUnit
     go p file = do pwd <- getCurrentDirectory
                    let fPath = mconcat [pwd,"/",file]
-                   _ <- S.satWith slvr{S.transcript = Just fPath} p >> return ()
-                   return (slvr,fPath)
+                   _ <- runner c{U.transcript = Just fPath} p >> return ()
+                   return (c,fPath)
 
 -- | Cleanup the environment created by criterion by removing the transcript
 -- file used to run the standalone solver
@@ -79,16 +88,16 @@ standaloneCleanup (_,fPath) =  P.callCommand $ "rm " ++ fPath
 -- generates a random filename that is removed at the end of the benchmark. This
 -- version exposes the solver in case the user would like to benchmark with
 -- something other than 'Data.SBV.z3'
-mkOverheadBenchMark' :: S.Provable a => S.SMTConfig -> String -> a -> Benchmark
-mkOverheadBenchMark' slvr desc problem =
+mkOverheadBenchMark' :: NFData b => Runner a b -> U.SMTConfig -> String -> a -> Benchmark
+mkOverheadBenchMark' runner slvr desc problem =
   envWithCleanup
-  (standaloneEnv slvr problem mkFileName)
+  (standaloneEnv runner slvr problem U.mkFileName)
   standaloneCleanup $
   \ ~unit ->
     bgroup desc [ bench "standalone" $ nfIO $ runStandaloneSolver unit
                 -- notice for sbv benchmark; we pull the solver out of unit and
                 -- use the input problem not the transcript in the unit
-                , bench "sbv"        $ nfIO $ S.satWith (fst unit) problem
+                , bench "sbv"        $ nfIO $ runner (fst unit) problem
                 ]
 
 -- | To construct a benchmark to test SBV's overhead we setup an environment
@@ -96,5 +105,8 @@ mkOverheadBenchMark' slvr desc problem =
 -- To test the solver without respect to SBV (standalone) we pass the transcript
 -- file to the solver using the same primitives SBV does. Not that mkFileName
 -- generates a random filename that is removed at the end of the benchmark
-mkOverheadBenchMark :: S.Provable a => String -> a -> Benchmark
-mkOverheadBenchMark = mkOverheadBenchMark' S.z3
+mkSatOverheadBenchMark :: U.Provable a => String -> a -> Benchmark
+mkSatOverheadBenchMark = mkOverheadBenchMark' U.satWith U.z3
+
+mkPveOverheadBenchMark :: U.Provable a => String -> a -> Benchmark
+mkPveOverheadBenchMark = mkOverheadBenchMark' U.proveWith U.z3
