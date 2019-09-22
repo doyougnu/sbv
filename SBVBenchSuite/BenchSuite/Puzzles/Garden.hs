@@ -24,5 +24,5 @@ import BenchSuite.Overhead.SBVOverhead
 
 -- benchmark suite
 benchmarks :: Benchmark
-benchmarks = mkOverheadBenchMark' s "Garden" puzzle
+benchmarks = mkOverheadBenchMark' allSatWith s "Garden" puzzle
   where s = z3{satTrackUFs = False, isNonModelVar = ("_modelIgnore" `isSuffixOf`)}

@@ -22,4 +22,4 @@ import BenchSuite.Overhead.SBVOverhead
 
 -- benchmark suite
 benchmarks :: Benchmark
-benchmarks = mkOverheadBenchMark "Birthday" puzzle
+benchmarks = mkOverheadBenchMark allSatWith "Birthday" puzzle

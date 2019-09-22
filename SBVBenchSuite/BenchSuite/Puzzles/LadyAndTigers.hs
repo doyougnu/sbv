@@ -21,7 +21,7 @@ import BenchSuite.Overhead.SBVOverhead
 
 -- benchmark suite
 benchmarks :: Benchmark
-benchmarks = mkOverheadBenchMark "Puzzles.LadyAndTigers" p
+benchmarks = mkOverheadBenchMark allSatWith "Puzzles.LadyAndTigers" p
   where p = do
 
           -- One boolean for each of the correctness of the signs

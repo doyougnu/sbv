@@ -21,7 +21,7 @@ import BenchSuite.Overhead.SBVOverhead
 
 -- benchmark suite
 benchmarks :: Benchmark
-benchmarks = mkOverheadBenchMark "Puzzles.SendMoreMoney" p
+benchmarks = mkOverheadBenchMark allSatWith "Puzzles.SendMoreMoney" p
   where p = do
           ds@[s,e,n,d,m,o,r,y] <- mapM sInteger ["s", "e", "n", "d", "m", "o", "r", "y"]
           let isDigit x = x .>= 0 .&& x .<= 9

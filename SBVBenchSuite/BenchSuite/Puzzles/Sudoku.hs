@@ -23,7 +23,7 @@ import BenchSuite.Overhead.SBVOverhead
 -- benchmark suite
 benchmarks :: Benchmark
 benchmarks = bgroup "Sudoku"
-    [ mkOverheadBenchMark ("sudoku " ++ show n) (checkPuzzle s)
+    [ mkOverheadBenchMark allSatWith ("sudoku " ++ show n) (checkPuzzle s)
        | (n, s) <-
            zip
              [(0::Int)..]

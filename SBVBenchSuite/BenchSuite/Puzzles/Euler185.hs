@@ -22,4 +22,4 @@ import BenchSuite.Overhead.SBVOverhead
 
 -- benchmark suite
 benchmarks :: Benchmark
-benchmarks = mkOverheadBenchMark "Euler185" euler185
+benchmarks = mkOverheadBenchMark allSatWith "Euler185" euler185
