@@ -9,7 +9,7 @@
 -- Assessing the overhead of calling solving examples via sbv vs individual solvers
 -----------------------------------------------------------------------------
 
-{-# OPTIONS_GHC -Wall -Werror #-}
+{-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans #-}
 {-# LANGUAGE CPP                    #-}
 {-# LANGUAGE FlexibleContexts       #-}
 {-# LANGUAGE FlexibleInstances      #-}
@@ -18,9 +18,10 @@ module BenchSuite.Overhead.SBVOverhead
   ( mkSatOverheadBenchMark
   , mkPveOverheadBenchMark
   , mkOverheadBenchMark'
+  , mkOverheadBenchMark
   ) where
 
-import           Control.DeepSeq         (NFData)
+import           Control.DeepSeq         (NFData(..), rwhnf)
 import           System.Directory        (getCurrentDirectory)
 import           System.IO
 
@@ -86,8 +87,10 @@ standaloneCleanup (_,fPath) =  P.callCommand $ "rm " ++ fPath
 -- To test the solver without respect to SBV (standalone) we pass the transcript
 -- file to the solver using the same primitives SBV does. Not that mkFileName
 -- generates a random filename that is removed at the end of the benchmark. This
--- version exposes the solver in case the user would like to benchmark with
--- something other than 'Data.SBV.z3'
+-- function exposes the solver and the solve interface in case the user would
+-- like to benchmark with something other than 'Data.SBV.z3' and so that we can
+-- benchmark all solving variants, e.g., 'Data.SBV.proveWith',
+-- 'Data.SBV.satWith', 'Data.SBV.allProveWith' etc.
 mkOverheadBenchMark' :: NFData b => Runner a b -> U.SMTConfig -> String -> a -> Benchmark
 mkOverheadBenchMark' runner slvr desc problem =
   envWithCleanup
@@ -100,13 +103,17 @@ mkOverheadBenchMark' runner slvr desc problem =
                 , bench "sbv"        $ nfIO $ runner (fst unit) problem
                 ]
 
--- | To construct a benchmark to test SBV's overhead we setup an environment
--- with criterion where a symbolic computation is emitted to a transcript file.
--- To test the solver without respect to SBV (standalone) we pass the transcript
--- file to the solver using the same primitives SBV does. Not that mkFileName
--- generates a random filename that is removed at the end of the benchmark
+-- | Convenience functions for benchmarking.
 mkSatOverheadBenchMark :: U.Provable a => String -> a -> Benchmark
 mkSatOverheadBenchMark = mkOverheadBenchMark' U.satWith U.z3
 
 mkPveOverheadBenchMark :: U.Provable a => String -> a -> Benchmark
 mkPveOverheadBenchMark = mkOverheadBenchMark' U.proveWith U.z3
+
+mkOverheadBenchMark :: (U.Provable a, NFData b) => Runner a b -> String -> a -> Benchmark
+mkOverheadBenchMark = flip mkOverheadBenchMark' U.z3
+
+-- | Orphaned instances just for benchmarking
+instance NFData U.AllSatResult where
+  rnf (U.AllSatResult (a, b, c, results)) =
+    rnf a `seq` rnf b `seq` rnf c `seq` rwhnf results
