@@ -10,20 +10,27 @@
 -----------------------------------------------------------------------------
 
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans #-}
-{-# LANGUAGE CPP               #-}
-{-# LANGUAGE FlexibleContexts  #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE CPP                       #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE FlexibleContexts          #-}
+{-# LANGUAGE FlexibleInstances         #-}
+{-# LANGUAGE RecordWildCards           #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE ScopedTypeVariables       #-}
+{-# LANGUAGE RankNTypes                #-}
 
 module BenchSuite.Overhead.SBVOverhead
   ( mkRunner'
   , mkRunner
+  , mkRunnerWith
   , mkOverheadBenchMark
   , onConfig
   , onDesc
   , onRunner
+  , setRunner
   , onProblem
   , Runner(..)
+  , using
   ) where
 
 import           Control.DeepSeq         (NFData (..), rwhnf)
@@ -35,13 +42,16 @@ import           Criterion.Main
 import qualified System.Process          as P
 import qualified Utils.SBVBenchFramework as U
 
--- | The problem to benchmark, rendered as a file to input into solvers via the
--- shell and not sbv
-type Problem = FilePath
+-- | The type of the problem to benchmark. This allows us to operate on Runners
+-- as values themselves yet still have a unified interface with criterion
+data Problem = forall a . U.Provable a => Problem a
+
+-- | Similarly to Problem, BenchResult is boilerplate for a nice api
+data BenchResult = forall a . (Show a, NFData a) => BenchResult a
 
 -- | A bench unit is a solver and a problem that represents an input problem
 -- for the solver to solve
-type BenchUnit = (U.SMTConfig, Problem)
+type BenchUnit = (U.SMTConfig, FilePath)
 
 -- | A runner is either 'Data.SBV.proveWith' or 'Data.SBV.satWith'. Where "a" is
 -- the problem sent to the solver and "b" is the return type. This could be a
@@ -53,28 +63,34 @@ type BenchUnit = (U.SMTConfig, Problem)
 -- useful because problems that require 'Data.SBV.allSatWith' can lead to a lot
 -- of variance in the benchmarking data. Single benchmark runners like
 -- 'Data.SBV.satWith' and 'Data.SBV.proveWith' work best.
-data Runner a b = Runner { runner      :: (U.SMTConfig -> a -> IO b)
-                         , config      :: U.SMTConfig
-                         , description :: String
-                         , problem     :: a
-                         }
+data Runner = Runner { runner      :: (U.SMTConfig -> Problem -> IO BenchResult)
+                     , config      :: U.SMTConfig
+                     , description :: String
+                     , problem     :: Problem
+}
 
 -- | Convenience boilerplate functions, simply avoiding a lens dependency
-using :: Runner a b -> (Runner a b -> Runner a b) -> Runner a b
+using :: Runner -> (Runner -> Runner) -> Runner
 using = flip ($)
 
-onRunner :: ((U.SMTConfig -> a -> IO b) -> (U.SMTConfig -> a -> IO b))
-          -> Runner a b -> Runner a b
-onRunner f r@Runner{..} = r{runner = f runner}
+setRunner :: (Show c, NFData c) => (forall a. U.SMTConfig -> a -> IO c) -> Runner -> Runner
+setRunner r' r@Runner{..} = r{runner = toRunner r'}
 
-onConfig :: (U.SMTConfig -> U.SMTConfig) -> Runner a b -> Runner a b
+toRunner :: (Show c, NFData c) => (forall a . U.SMTConfig -> a -> IO c) -> U.SMTConfig -> Problem -> IO BenchResult
+toRunner f c p = BenchResult <$> helper p
+  where helper (Problem a) = f c a
+
+onConfig :: (U.SMTConfig -> U.SMTConfig) -> Runner -> Runner
 onConfig f r@Runner{..} = r{config = f config}
 
-onDesc :: (String -> String) -> Runner a b -> Runner a b
+onDesc :: (String -> String) -> Runner -> Runner
 onDesc f r@Runner{..} = r{description = f description}
 
-onProblem :: (a -> a) -> Runner a b -> Runner a b
-onProblem f r@Runner{..} = r{problem = f problem}
+onProblem :: (forall a. a -> a) -> Runner -> Runner
+onProblem f r@Runner{..} = r{problem = (helper problem)}
+  where
+    helper :: Problem -> Problem
+    helper (Problem p) = Problem $ f p
 
 
 -- | Filepath to /dev/null
@@ -99,7 +115,7 @@ runStandaloneSolver (slvr, fname) =
 
 -- | Given a file name, a solver config, and a problem to solve, create an
 -- environment for the criterion benchmark by generating a transcript file
-standaloneEnv :: Runner a b -> IO FilePath -> IO BenchUnit
+standaloneEnv :: Runner -> IO FilePath -> IO BenchUnit
 standaloneEnv Runner{..} f = f >>= go problem
   where
     -- generate a transcript for the unit
@@ -122,7 +138,7 @@ standaloneCleanup (_,fPath) =  P.callCommand $ "rm " ++ fPath
 -- like to benchmark with something other than 'Data.SBV.z3' and so that we can
 -- benchmark all solving variants, e.g., 'Data.SBV.proveWith',
 -- 'Data.SBV.satWith', 'Data.SBV.allProveWith' etc.
-mkOverheadBenchMark :: (U.Provable a, NFData b) => Runner a b -> Benchmark
+mkOverheadBenchMark :: Runner -> Benchmark
 mkOverheadBenchMark r@Runner{..} =
   envWithCleanup
   (standaloneEnv r U.mkFileName)
@@ -135,19 +151,19 @@ mkOverheadBenchMark r@Runner{..} =
                        ]
 
 -- | This is just a wrapper around the Runner constructor and serves as the main
--- entry point to make a runner for a user in case they need something custom. 
-mkRunner' :: (U.Provable a, NFData b) =>
-  (U.SMTConfig -> a -> IO b) -> U.SMTConfig -> String -> a -> Runner a b
+-- entry point to make a runner for a user in case they need something custom.
+mkRunner' :: NFData b =>
+  (U.SMTConfig -> a -> IO b) -> U.SMTConfig -> String -> Problem -> Runner
 mkRunner' runner config description problem = Runner{..}
 
 -- | Convenience function for creating benchmarks that exposes
-mkRunnerWith :: U.Provable a => U.SMTConfig -> String -> a -> Runner a U.SatResult
-mkRunnerWith = mkRunner' U.satWith 
+mkRunnerWith :: U.Provable a => U.SMTConfig -> String -> a -> Runner
+mkRunnerWith c d p = mkRunner' U.satWith c d (Problem p)
 
 -- | Main entry point for simple benchmarks. See 'mkRunner'' or 'mkRunnerWith'
 -- for versions of this function that allows custom inputs. If you have some use
 -- case that is not considered then you can simply overload the record fields.
-mkRunner :: U.Provable a => String -> a -> Runner a U.SatResult
+mkRunner :: (U.Provable a) => String -> a -> Runner
 mkRunner d p = mkRunnerWith U.z3 d p `using` onRunner (const U.satWith)
 
 -- | Orphaned instances just for benchmarking
