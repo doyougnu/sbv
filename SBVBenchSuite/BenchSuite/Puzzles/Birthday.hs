@@ -21,5 +21,5 @@ import BenchSuite.Overhead.SBVOverhead
 
 
 -- benchmark suite
-benchmarks :: Benchmark
-benchmarks = mkOverheadBenchMark allSatWith "Birthday" puzzle
+benchmarks :: Runner
+benchmarks = runner "Birthday" puzzle `using` setRunner allSatWith

@@ -19,8 +19,8 @@ import BenchSuite.Overhead.SBVOverhead
 
 
 -- benchmark suite
-benchmarks :: Benchmark
-benchmarks = mkOverheadBenchMark allSatWith "DogCatMouse" p
+benchmarks :: Runner
+benchmarks = runner "DogCatMouse" p `using` setRunner allSatWith
   where p = do [dog, cat, mouse] <- sIntegers ["dog", "cat", "mouse"]
                solve [ dog   .>= 1                                   -- at least one dog
                      , cat   .>= 1                                   -- at least one cat

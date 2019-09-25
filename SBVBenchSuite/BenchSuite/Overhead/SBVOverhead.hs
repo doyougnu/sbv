@@ -156,8 +156,8 @@ standaloneCleanup (_,fPath) =  P.callCommand $ "rm " ++ fPath
 -- like to benchmark with something other than 'Data.SBV.z3' and so that we can
 -- benchmark all solving variants, e.g., 'Data.SBV.proveWith',
 -- 'Data.SBV.satWith', 'Data.SBV.allProveWith' etc.
-mkOverheadBenchMark :: RunnerI -> Benchmark
-mkOverheadBenchMark r@RunnerI{..} =
+mkOverheadBenchMark' :: RunnerI -> Benchmark
+mkOverheadBenchMark' r@RunnerI{..} =
   envWithCleanup
   (standaloneEnv r U.mkFileName)
   standaloneCleanup $
@@ -167,6 +167,10 @@ mkOverheadBenchMark r@RunnerI{..} =
                        -- use the input problem not the transcript in the unit
                        , bench "sbv"        $ nfIO $ run (fst unit) problem
                        ]
+
+mkOverheadBenchMark :: Runner -> Benchmark
+mkOverheadBenchMark (Runner r@RunnerI{..}) = mkOverheadBenchMark' r
+mkOverheadBenchMark (RunnerGroup rs)       = bgroup "" $ mkOverheadBenchMark <$> rs
 
 -- | This is just a wrapper around the RunnerI constructor and serves as the main
 -- entry point to make a runner for a user in case they need something custom.

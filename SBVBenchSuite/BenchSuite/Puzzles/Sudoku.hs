@@ -21,9 +21,9 @@ import BenchSuite.Overhead.SBVOverhead
 
 
 -- benchmark suite
-benchmarks :: Benchmark
-benchmarks = bgroup "Sudoku"
-    [ mkOverheadBenchMark allSatWith ("sudoku " ++ show n) (checkPuzzle s)
+benchmarks :: Runner
+benchmarks = rGroup
+    [ runner ("sudoku " ++ show n) (checkPuzzle s) `using` setRunner allSatWith
        | (n, s) <-
            zip
              [(0::Int)..]

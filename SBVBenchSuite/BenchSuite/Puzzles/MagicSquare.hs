@@ -21,10 +21,10 @@ import BenchSuite.Overhead.SBVOverhead
 
 
 -- benchmark suite
-benchmarks :: Benchmark
-benchmarks = bgroup "MagicSquare"
-  [ mkOverheadBenchMark allSatWith "magic 2" (mkMagic 2)
-  , mkOverheadBenchMark allSatWith "magic 3" (mkMagic 3)
+benchmarks :: Runner
+benchmarks = rGroup
+  [ runner "MagicSquare.magic 2" (mkMagic 2) `using` setRunner allSatWith
+  , runner "MagicSquare.magic 3" (mkMagic 3) `using` setRunner allSatWith
   ]
 
 mkMagic :: Int -> Symbolic SBool

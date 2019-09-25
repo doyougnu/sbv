@@ -23,6 +23,6 @@ import BenchSuite.Overhead.SBVOverhead
 
 
 -- benchmark suite
-benchmarks :: Benchmark
-benchmarks = mkOverheadBenchMark' allSatWith s "Garden" puzzle
+benchmarks :: Runner 
+benchmarks = runnerWith s "Garden" puzzle `using` setRunner allSatWith
   where s = z3{satTrackUFs = False, isNonModelVar = ("_modelIgnore" `isSuffixOf`)}

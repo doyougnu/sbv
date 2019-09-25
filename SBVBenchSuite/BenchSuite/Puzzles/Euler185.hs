@@ -21,5 +21,5 @@ import BenchSuite.Overhead.SBVOverhead
 
 
 -- benchmark suite
-benchmarks :: Benchmark
-benchmarks = mkOverheadBenchMark allSatWith "Euler185" euler185
+benchmarks :: Runner
+benchmarks = runner "Euler185" euler185 `using` setRunner allSatWith
