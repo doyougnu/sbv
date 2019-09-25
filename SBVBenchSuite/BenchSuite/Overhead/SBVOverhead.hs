@@ -20,13 +20,12 @@
 {-# LANGUAGE RankNTypes                #-}
 
 module BenchSuite.Overhead.SBVOverhead
-  ( mkRunner'
-  , mkRunner
+  (  mkRunner
+  , mkRunner'
   , mkRunnerWith
   , mkOverheadBenchMark
   , onConfig
   , onDesc
-  , onRunner
   , setRunner
   , onProblem
   , Runner(..)
@@ -43,7 +42,7 @@ import qualified System.Process          as P
 import qualified Utils.SBVBenchFramework as U
 
 -- | The type of the problem to benchmark. This allows us to operate on Runners
--- as values themselves yet still have a unified interface with criterion
+-- as values themselves yet still have a unified interface with criterion.
 data Problem = forall a . U.Provable a => Problem a
 
 -- | Similarly to Problem, BenchResult is boilerplate for a nice api
@@ -73,10 +72,10 @@ data Runner = Runner { runner      :: (U.SMTConfig -> Problem -> IO BenchResult)
 using :: Runner -> (Runner -> Runner) -> Runner
 using = flip ($)
 
-setRunner :: (Show c, NFData c) => (forall a. U.SMTConfig -> a -> IO c) -> Runner -> Runner
+setRunner :: (Show c, NFData c) => (forall a. U.Provable a => U.SMTConfig -> a -> IO c) -> Runner -> Runner
 setRunner r' r@Runner{..} = r{runner = toRunner r'}
 
-toRunner :: (Show c, NFData c) => (forall a . U.SMTConfig -> a -> IO c) -> U.SMTConfig -> Problem -> IO BenchResult
+toRunner :: (Show c, NFData c) => (forall a. U.Provable a => U.SMTConfig -> a -> IO c) -> U.SMTConfig -> Problem -> IO BenchResult
 toRunner f c p = BenchResult <$> helper p
   where helper (Problem a) = f c a
 
@@ -152,9 +151,10 @@ mkOverheadBenchMark r@Runner{..} =
 
 -- | This is just a wrapper around the Runner constructor and serves as the main
 -- entry point to make a runner for a user in case they need something custom.
-mkRunner' :: NFData b =>
-  (U.SMTConfig -> a -> IO b) -> U.SMTConfig -> String -> Problem -> Runner
-mkRunner' runner config description problem = Runner{..}
+mkRunner' :: (NFData b, Show b) =>
+  (forall a. U.Provable a => U.SMTConfig -> a -> IO b) -> U.SMTConfig -> String -> Problem -> Runner
+mkRunner' r config description problem = Runner{..}
+  where runner = toRunner r
 
 -- | Convenience function for creating benchmarks that exposes
 mkRunnerWith :: U.Provable a => U.SMTConfig -> String -> a -> Runner
@@ -163,10 +163,12 @@ mkRunnerWith c d p = mkRunner' U.satWith c d (Problem p)
 -- | Main entry point for simple benchmarks. See 'mkRunner'' or 'mkRunnerWith'
 -- for versions of this function that allows custom inputs. If you have some use
 -- case that is not considered then you can simply overload the record fields.
-mkRunner :: (U.Provable a) => String -> a -> Runner
-mkRunner d p = mkRunnerWith U.z3 d p `using` onRunner (const U.satWith)
+mkRunner :: U.Provable a => String -> a -> Runner
+mkRunner d p = mkRunnerWith U.z3 d p `using` setRunner U.satWith
 
 -- | Orphaned instances just for benchmarking
 instance NFData U.AllSatResult where
   rnf (U.AllSatResult (a, b, c, results)) =
     rnf a `seq` rnf b `seq` rnf c `seq` rwhnf results
+
+instance NFData BenchResult where rnf (BenchResult a) = rnf a
