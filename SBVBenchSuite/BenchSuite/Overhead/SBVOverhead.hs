@@ -11,13 +11,13 @@
 
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans #-}
 {-# LANGUAGE CPP                       #-}
+{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleContexts          #-}
 {-# LANGUAGE FlexibleInstances         #-}
-{-# LANGUAGE RecordWildCards           #-}
-{-# LANGUAGE ExistentialQuantification #-}
-{-# LANGUAGE RankNTypes                #-}
-{-# LANGUAGE ScopedTypeVariables       #-}
 {-# LANGUAGE GADTs                     #-}
+{-# LANGUAGE RankNTypes                #-}
+{-# LANGUAGE RecordWildCards           #-}
+{-# LANGUAGE ScopedTypeVariables       #-}
 
 module BenchSuite.Overhead.SBVOverhead
   ( runner
@@ -53,16 +53,16 @@ data BenchResult = forall a . (Show a, NFData a) => BenchResult a
 -- for the solver to solve
 type BenchUnit = (U.SMTConfig, FilePath)
 
--- | A runner is either 'Data.SBV.proveWith' or 'Data.SBV.satWith'. We utilize
--- existential types to lose type information and create a unified interface
--- with criterion. We require a runner in order to generate a
--- 'Data.SBV.transcript' and then to run the actual benchmark. We bundle this
--- redundantly into a record so that the benchmarks can be defined in each
--- respective module, with the runner that makes sense for that problem, and
--- then redefined in 'SBVBench'. This is useful because problems that require
--- 'Data.SBV.allSatWith' can lead to a lot of variance in the benchmarking data.
--- Single benchmark runners like 'Data.SBV.satWith' and 'Data.SBV.proveWith'
--- work best.
+-- | A runner is anything that allows the solver to solve, such as:
+-- 'Data.SBV.proveWith' or 'Data.SBV.satWith'. We utilize existential types to
+-- lose type information and create a unified interface with criterion. We
+-- require a runner in order to generate a 'Data.SBV.transcript' and then to run
+-- the actual benchmark. We bundle this redundantly into a record so that the
+-- benchmarks can be defined in each respective module, with the run function
+-- that makes sense for that problem, and then redefined in 'SBVBench'. This is
+-- useful because problems that require 'Data.SBV.allSatWith' can lead to a lot
+-- of variance in the benchmarking data. Single benchmark runners like
+-- 'Data.SBV.satWith' and 'Data.SBV.proveWith' work best.
 data RunnerI = RunnerI { run         :: (U.SMTConfig -> Problem -> IO BenchResult)
                        , config      :: U.SMTConfig
                        , description :: String
@@ -70,8 +70,8 @@ data RunnerI = RunnerI { run         :: (U.SMTConfig -> Problem -> IO BenchResul
 }
 
 -- | GADT to allow arbritrary nesting of runners. This copies criterion's design
--- so that we don't have to break out runner that run a single benchmark from
--- runners that need to run several benchmarks
+-- so that we don't have to separate out runners that run a single benchmark
+-- from runners that need to run several benchmarks
 data Runner where
   Runner :: RunnerI -> Runner           -- ^ a single run
   RunnerGroup :: [Runner] -> Runner     -- ^ a group of runs
@@ -83,7 +83,7 @@ using = flip ($)
 setRunner :: (Show c, NFData c) =>
   (forall a. U.Provable a => U.SMTConfig -> a -> IO c) -> Runner -> Runner
 setRunner r' (Runner r@RunnerI{..}) = Runner $ r{run = toRun r'}
-setRunner r' (RunnerGroup rs) = RunnerGroup $ setRunner r' <$> rs
+setRunner r' (RunnerGroup rs)       = RunnerGroup $ setRunner r' <$> rs
 
 toRun :: (Show c, NFData c) =>
   (forall a. U.Provable a => U.SMTConfig -> a -> IO c)
@@ -170,7 +170,8 @@ mkOverheadBenchMark' r@RunnerI{..} =
 
 mkOverheadBenchMark :: Runner -> Benchmark
 mkOverheadBenchMark (Runner r@RunnerI{..}) = mkOverheadBenchMark' r
-mkOverheadBenchMark (RunnerGroup rs)       = bgroup "" $ mkOverheadBenchMark <$> rs
+mkOverheadBenchMark (RunnerGroup rs)       = bgroup "" $ -- leave the description close to the benchmark/problem definition
+                                             mkOverheadBenchMark <$> rs
 
 -- | This is just a wrapper around the RunnerI constructor and serves as the main
 -- entry point to make a runner for a user in case they need something custom.
@@ -183,7 +184,7 @@ runner' :: (NFData b, Show b) =>
 runner' r config description problem = Runner $ RunnerI{..}
   where run = toRun r
 
--- | Convenience function for creating benchmarks that exposes
+-- | Convenience function for creating benchmarks that exposes a configuration
 runnerWith :: U.Provable a => U.SMTConfig -> String -> a -> Runner
 runnerWith c d p = runner' U.satWith c d (Problem p)
 
@@ -193,6 +194,8 @@ runnerWith c d p = runner' U.satWith c d (Problem p)
 runner :: U.Provable a => String -> a -> Runner
 runner d p = runnerWith U.z3 d p `using` setRunner U.satWith
 
+-- | create a runner group. Useful for benchmarks that need to run several
+-- benchmarks. See 'BenchSuite.Puzzles.NQueens' for an example.
 rGroup :: [Runner] -> Runner
 rGroup = RunnerGroup
 
@@ -201,4 +204,5 @@ instance NFData U.AllSatResult where
   rnf (U.AllSatResult (a, b, c, results)) =
     rnf a `seq` rnf b `seq` rnf c `seq` rwhnf results
 
+-- | Unwrap the existential type to make criterion happy
 instance NFData BenchResult where rnf (BenchResult a) = rnf a
