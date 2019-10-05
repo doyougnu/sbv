@@ -30,6 +30,7 @@ import qualified BenchSuite.Puzzles.NQueens
 import qualified BenchSuite.Puzzles.SendMoreMoney
 import qualified BenchSuite.Puzzles.Sudoku
 import qualified BenchSuite.Puzzles.U2Bridge
+import qualified BenchSuite.Tmp.Mem
 
 -- | Custom config to limit benchmarks to 5 minutes of runtime. This is required
 -- because we can easily generate benchmarks that take a lot of wall time to
@@ -40,8 +41,8 @@ benchConfig = defaultConfig {timeLimit = 300.00}
 -- The bench harness
 main :: IO ()
 main = defaultMainWith benchConfig $
-       [ puzzles
-       ]
+        BenchSuite.Tmp.Mem.benchmarks
+         -- puzzles
 
 -- | Benchmarks for 'Documentation.SBV.Examples.Puzzles'. Each benchmark file
 -- defines a 'benchmarks' function which returns a

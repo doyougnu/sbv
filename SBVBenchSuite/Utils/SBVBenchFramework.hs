@@ -21,7 +21,7 @@ import qualified Data.List      as L
 import           System.Process (showCommandForUser)
 import           System.Random
 
-import           Criterion.Main (Benchmark, bgroup)
+import           Criterion.Main (Benchmark, bgroup, nfIO,bench)
 
 import           Data.SBV
 

@@ -427,3 +427,4 @@ Benchmark SBVBench
                   , BenchSuite.Puzzles.SendMoreMoney
                   , BenchSuite.Puzzles.Sudoku
                   , BenchSuite.Puzzles.U2Bridge
+                  , BenchSuite.Tmp.Mem
