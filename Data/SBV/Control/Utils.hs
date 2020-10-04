@@ -16,6 +16,7 @@
 {-# LANGUAGE LambdaCase             #-}
 {-# LANGUAGE NamedFieldPuns         #-}
 {-# LANGUAGE ScopedTypeVariables    #-}
+{-# LANGUAGE ViewPatterns           #-}
 {-# LANGUAGE TupleSections          #-}
 {-# LANGUAGE TypeApplications       #-}
 
@@ -62,6 +63,7 @@ import Data.Maybe (isNothing, isJust)
 import Data.IORef (readIORef, writeIORef)
 
 import Data.Time (getZonedTime)
+import Data.Text (unpack)
 
 import Data.SBV.Core.Data     ( SV(..), trueSV, falseSV, CV(..), trueCV, falseCV, SBV, sbvToSV, kindOf, Kind(..)
                               , HasKind(..), mkConstCV, CVal(..), SMTResult(..)
@@ -79,6 +81,7 @@ import Data.SBV.Core.Symbolic ( IncState(..), withNewIncState, State(..), svToSV
                               , registerLabel, svMkSymVar, validationRequested
                               , isSafetyCheckingIStage, isSetupIStage, isRunIStage, IStage(..), QueryT(..)
                               , extractSymbolicSimulationState, MonadSymbolic(..), newUninterpreted
+                              , NamedSymVar(..),getSV,getUserName'
                               )
 
 import Data.SBV.Core.AlgReals   (mergeAlgReals, AlgReal(..), RealPoint(..))
@@ -1155,14 +1158,14 @@ getAllSatResult = do queryDebug ["*** Checking Satisfiability, all solutions.."]
 
                          vars :: [(SVal, NamedSymVar)]
                          vars = let sortByNodeId :: [NamedSymVar] -> [NamedSymVar]
-                                    sortByNodeId = sortBy (compare `on` (\(SV _ n, _) -> n))
+                                    sortByNodeId = sortBy (compare `on` (\(NamedSymVar (SV _ n) _) -> n))
 
                                     mkSVal :: NamedSymVar -> (SVal, NamedSymVar)
-                                    mkSVal nm@(sv, _) = (SVal (kindOf sv) (Right (cache (const (return sv)))), nm)
+                                    mkSVal nm@(getSV -> sv) = (SVal (kindOf sv) (Right (cache (const (return sv)))), nm)
 
                                     ignored n = isNonModelVar cfg n || "__internal_sbv" `isPrefixOf` n
 
-                                in map mkSVal $ sortByNodeId [nv | (_, nv@(_, n)) <- allModelInputs, not (ignored n)]
+                                in map mkSVal $ sortByNodeId [nv | (_, nv) <- allModelInputs, not (ignored (getUserName' nv))]
 
                          -- If we have any universals, then the solutions are unique upto prefix existentials.
                          w = ALL `elem` map fst qinps
@@ -1216,8 +1219,8 @@ getAllSatResult = do queryDebug ["*** Checking Satisfiability, all solutions.."]
                                        endMsg $ Just $ "[" ++ m ++ "]"
                                        return sofar{ allSatSolverReturnedDSat = True }
 
-                          Sat    -> do assocs <- mapM (\(sval, (sv, n)) -> do cv <- getValueCV Nothing sv
-                                                                              return (sv, (n, (sval, cv)))) vars
+                          Sat    -> do assocs <- mapM (\(sval, (NamedSymVar sv n)) -> do cv <- getValueCV Nothing sv
+                                                                                         return (sv, (n, (sval, cv)))) vars
 
                                        let getUIFun ui@(nm, t) = do cvs <- getUIFunCVAssoc Nothing ui
                                                                     return (nm, (t, cvs))
@@ -1230,17 +1233,17 @@ getAllSatResult = do queryDebug ["*** Checking Satisfiability, all solutions.."]
                                                            return []
 
                                        bindings <- let grab i@(ALL, _)      = return (i, Nothing)
-                                                       grab i@(EX, (sv, _)) = case sv `lookup` assocs of
-                                                                                Just (_, (_, cv)) -> return (i, Just cv)
-                                                                                Nothing           -> do cv <- getValueCV Nothing sv
-                                                                                                        return (i, Just cv)
+                                                       grab i@(EX, (getSV -> sv)) = case sv `lookup` assocs of
+                                                                                      Just (_, (_, cv)) -> return (i, Just cv)
+                                                                                      Nothing           -> do cv <- getValueCV Nothing sv
+                                                                                                              return (i, Just cv)
                                                    in if validationRequested cfg
                                                          then Just <$> mapM grab qinps
                                                          else return Nothing
 
                                        let model = SMTModel { modelObjectives = []
                                                             , modelBindings   = bindings
-                                                            , modelAssocs     = Map.fromList $ sortOn fst obsvs ++ [(n, cv) | (_, (n, (_, cv))) <- assocs]
+                                                            , modelAssocs     = Map.fromList $ sortOn fst obsvs ++ [(unpack n, cv) | (_, (n, (_, cv))) <- assocs]
                                                             , modelUIFuns     = uiFunVals
                                                             }
                                            m = Satisfiable cfg model
@@ -1461,9 +1464,9 @@ runProofOn rm context comments res@(Result ki _qcInfo _observables _codeSegs is 
 
          skolemize :: [(Quantifier, NamedSymVar)] -> [Either SV (SV, [SV])]
          skolemize quants = go quants ([], [])
-           where go []                   (_,  sofar) = reverse sofar
-                 go ((ALL, (v, _)):rest) (us, sofar) = go rest (v:us, Left v : sofar)
-                 go ((EX,  (v, _)):rest) (us, sofar) = go rest (us,   Right (v, reverse us) : sofar)
+           where go []                   (_,  !sofar) = reverse sofar
+                 go ((ALL, (getSV -> v)):rest) (!us, !sofar) = go rest (v:us, Left v : sofar)
+                 go ((EX,  (getSV -> v)):rest) (!us, !sofar) = go rest (us,   Right (v, reverse us) : sofar)
 
          qinps      = if isSat then fst is else map flipQ (fst is)
          skolemMap  = skolemize qinps
@@ -1533,7 +1536,7 @@ executeQuery queryContext (QueryT userQuery) = do
                       QueryInternal -> return ()         -- we're good, internal usages don't mess with scopes
                       QueryExternal -> do
                         ((userInps, _), _) <- readIORef (rinps st)
-                        let badInps = {-# SCC "exQ_badInps" #-}reverse [n | (ALL, (_, n)) <- userInps]
+                        let badInps = {-# SCC "exQ_badInps" #-}reverse [n | (ALL, nm) <- userInps, let n = getUserName' nm]
                         case badInps of
                           [] -> return ()
                           _  -> let plu | length badInps > 1 = "s require"

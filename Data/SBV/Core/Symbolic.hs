@@ -44,7 +44,7 @@ module Data.SBV.Core.Symbolic
   , SBVExpr(..), newExpr, isCodeGenMode, isSafetyCheckingIStage, isRunIStage, isSetupIStage
   , Cached, cache, uncache, modifyState, modifyIncState
   , ArrayIndex(..), FArrayIndex(..), uncacheAI, uncacheFAI
-  , NamedSymVar, getSV, getUserName, getUserName'
+  , NamedSymVar(..), getSV, getUserName, getUserName'
   , getSValPathCondition, extendSValPathCondition
   , getTableIndex
   , SBVPgm(..), MonadSymbolic(..), SymbolicT, Symbolic, runSymbolic, State(..), withNewIncState, IncState(..), incrementInternalCounter
@@ -588,7 +588,7 @@ data NamedSymVar = NamedSymVar !SV !T.Text
                  deriving (Eq,Ord,Show,Generic)
 
 toNamedSV :: SV -> String -> NamedSymVar
-toNamedSV s = (NamedSymVar s) . T.pack
+toNamedSV s = NamedSymVar s . T.pack
 
 getSV :: NamedSymVar -> SV
 getSV (NamedSymVar s _) = s
