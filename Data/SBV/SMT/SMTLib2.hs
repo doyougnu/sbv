@@ -10,6 +10,7 @@
 -----------------------------------------------------------------------------
 
 {-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE ViewPatterns #-}
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
@@ -26,7 +27,7 @@ import           Data.Set             (Set)
 import qualified Data.Set             as Set
 
 import Data.SBV.Core.Data
-import Data.SBV.Core.Symbolic (QueryContext(..), SetOp(..))
+import Data.SBV.Core.Symbolic (QueryContext(..), SetOp(..),getSV,getUserName')
 import Data.SBV.Core.Kind (smtType, needsFlattening)
 import Data.SBV.SMT.Utils
 import Data.SBV.Control.Types
@@ -177,7 +178,7 @@ cvt ctx kindInfo isSat comments (inputs, trackerVars) skolemInps consts tbls arr
              ++ [ "; --- skolem constants ---" ]
              ++ [ "(declare-fun " ++ show s ++ " " ++ svFunType ss s ++ ")" ++ userName s | Right (s, ss) <- skolemInps]
              ++ [ "; --- optimization tracker variables ---" | not (null trackerVars) ]
-             ++ [ "(declare-fun " ++ show s ++ " " ++ svFunType [] s ++ ") ; tracks " ++ nm | (s, nm) <- trackerVars]
+             ++ [ "(declare-fun " ++ show s ++ " " ++ svFunType [] s ++ ") ; tracks " ++ nm | vars <- trackerVars, let s = getSV vars, let nm = getUserName' vars]
              ++ [ "; --- constant tables ---" ]
              ++ concatMap (uncurry (:) . constTable) constTables
              ++ [ "; --- skolemized tables ---" ]
@@ -317,7 +318,7 @@ cvt ctx kindInfo isSat comments (inputs, trackerVars) skolemInps consts tbls arr
         mkLet (s, SBVApp (Label m) [e]) = "(let ((" ++ show s ++ " " ++ cvtSV                skolemMap          e ++ ")) ; " ++ m
         mkLet (s, e)                    = "(let ((" ++ show s ++ " " ++ cvtExp solverCaps rm skolemMap tableMap e ++ "))"
 
-        userNameMap = M.fromList (map snd inputs)
+        userNameMap = M.fromList $ map (\namedSym -> (getSV namedSym, getUserName' namedSym)) $ map snd inputs
         userName s = case M.lookup s userNameMap of
                         Just u  | show s /= u -> " ; tracks user variable " ++ show u
                         _ -> ""
@@ -437,7 +438,7 @@ cvtInc inps newKs consts arrs tbls uis (SBVPgm asgnsSeq) cstrs cfg =
 
         newKinds = Set.toList newKs
 
-        declInp (s, _) = "(declare-fun " ++ show s ++ " () " ++ svType s ++ ")"
+        declInp (getSV -> s) = "(declare-fun " ++ show s ++ " () " ++ svType s ++ ")"
 
         (arrayConstants, arrayDelayeds, arraySetups) = unzip3 $ map (declArray cfg False consts skolemMap) arrs
 
