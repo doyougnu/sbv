@@ -14,6 +14,7 @@
 {-# LANGUAGE Rank2Types          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE BangPatterns        #-}
+{-# LANGUAGE ViewPatterns        #-}
 
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans #-}
 
@@ -41,7 +42,7 @@ import qualified Data.IntMap.Strict as IM
 
 
 import Data.Char     (toLower)
--- import Data.List     (intercalate, nubBy, sortBy, sortOn)
+import Data.Text     (unpack)
 import Data.List     (intercalate, nubBy)
 import Data.Maybe    (listToMaybe, catMaybes)
 import Data.Function (on)
@@ -334,8 +335,8 @@ getModelAtIndex mbi = do
           -- let sortByNodeId :: [(SV, (String, CV))] -> [(String, CV)]
           --     sortByNodeId = map snd . sortBy (compare `on` (\(SV _ nid, _) -> nid))
 
-          let grab (!sv, !nm) = wrap <$> getValueCV mbi sv
-                 where wrap c = (sv, (nm, c))
+          let grab (NamedSymVar sv nm) = wrap <$> getValueCV mbi sv
+                 where wrap c = (sv, ((unpack nm), c))
 
           !inputAssocs <- {-# SCC "gm_allModelInputs" #-} mapM (grab . snd) allModelInputs
 
@@ -357,7 +358,7 @@ getModelAtIndex mbi = do
                   Just cmds -> mapM_ (send True) cmds
 
           bindings <- let get i@(ALL, _)      = return (i, Nothing)
-                          get i@(EX, (sv, _)) = case sv `lookup` inputAssocs of
+                          get i@(EX, getSV -> sv) = case sv `lookup` inputAssocs of
                                                   Just (_, cv) -> return (i, Just cv)
                                                   Nothing      -> do cv <- getValueCV mbi sv
                                                                      return (i, Just cv)
@@ -401,9 +402,9 @@ getObjectiveValues = do let cmd = "(get-objectives)"
                   EApp [ECon nm, v] -> locate nm v               -- Regular case
                   _                 -> dontUnderstand (show expr)
 
-          where locate nm v = case listToMaybe [p | p@(sv, _) <- inputs, show sv == nm] of
+          where locate nm v = case listToMaybe [p | p@(NamedSymVar sv _) <- inputs, show sv == nm] of
                                 Nothing               -> return Nothing -- Happens when the soft assertion has a group-id that's not one of the input names
-                                Just (sv, actualName) -> grab sv v >>= \val -> return $ Just (actualName, val)
+                                Just (NamedSymVar sv (unpack -> actualName)) -> grab sv v >>= \val -> return $ Just (actualName, val)
 
                 dontUnderstand s = bailOut $ Just [ "Unable to understand solver output."
                                                   , "While trying to process: " ++ s
@@ -782,8 +783,8 @@ mkSMTResult asgns = do
                                     let userSS = map fst modelAssignment
 
                                         missing, extra, dup :: [String]
-                                        missing = [n | (EX, (s, n)) <- inps, s `notElem` userSS]
-                                        extra   = [show s | s <- userSS, s `notElem` map (fst . snd) inps]
+                                        missing = [getUserName' nm | (EX, nm) <- inps, getSV nm `notElem` userSS]
+                                        extra   = [show s | s <- userSS, s `notElem` map (getSV . snd) inps]
                                         dup     = let walk []     = []
                                                       walk (n:ns)
                                                         | n `elem` ns = show n : walk (filter (/= n) ns)
@@ -814,7 +815,7 @@ mkSMTResult asgns = do
                                                             , "*** Data.SBV: Check your query result construction!"
                                                             ]
 
-                                    let findName s = case [nm | (_, (i, nm)) <- inps, s == i] of
+                                    let findName s = case [unpack nm | (_, NamedSymVar i nm) <- inps, s == i] of
                                                         [nm] -> nm
                                                         []   -> error "*** Data.SBV: Impossible happened: Cannot find " ++ show s ++ " in the input list"
                                                         nms  -> error $ unlines [ ""

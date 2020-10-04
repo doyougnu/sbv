@@ -1075,7 +1075,7 @@ getQuantifiedInputs = do State{rinps} <- force <$> queryState
                              -- separate the existential prefix, which will go first
                              (!preQs, !postQs) = span (\(!q, _) -> force (q == EX)) qinps
 
-                         return $! preQs ++ trackers ++ postQs
+                         return $! preQs <> trackers <> postQs
 
 -- | Get observables, i.e., those explicitly labeled by the user with a call to 'Data.SBV.observe'.
 getObservables :: (MonadIO m, MonadQuery m) => m [(String, CV)]
