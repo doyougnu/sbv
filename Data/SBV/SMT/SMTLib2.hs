@@ -19,7 +19,7 @@ import Data.Bits  (bit)
 import Data.List  (intercalate, partition, nub, sort)
 import Data.Maybe (listToMaybe, fromMaybe, catMaybes)
 
-import qualified Data.Foldable as F (toList)
+import qualified Data.Foldable as F (toList,foldr')
 import qualified Data.Map.Strict      as M
 import qualified Data.IntMap.Strict   as IM
 import           Data.Set             (Set)
@@ -145,7 +145,7 @@ cvt ctx kindInfo isSat comments (inputs, trackerVars) skolemInps consts tbls arr
                     : concat [flattenConfig | any needsFlattening kindInfo, Just flattenConfig <- [supportsFlattenedModels solverCaps]]
 
         -- process all other settings we're given. If an option cannot be repeated, we only take the last one.
-        userSettings = map setSMTOption $ filter (not . isLogic) $ foldr comb [] $ solverSetOptions cfg
+        userSettings = map setSMTOption $ filter (not . isLogic) $ F.foldr' comb [] $ solverSetOptions cfg
            where -- Logic is already processed, so drop it:
                  isLogic SetLogic{} = True
                  isLogic _          = False
@@ -398,6 +398,7 @@ declMaybe = [ "(declare-datatypes ((SBVMaybe 1)) ((par (T)"
 -- for a list of what we include, in case something doesn't show up
 -- and you need it!
 cvtInc :: SMTLibIncConverter [String]
+{-# SCC cvtInc #-}
 cvtInc inps newKs consts arrs tbls uis (SBVPgm asgnsSeq) cstrs cfg =
             -- any new settings?
                settings

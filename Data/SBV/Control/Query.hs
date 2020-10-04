@@ -13,6 +13,7 @@
 {-# LANGUAGE NamedFieldPuns      #-}
 {-# LANGUAGE Rank2Types          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE BangPatterns        #-}
 
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans #-}
 
@@ -40,7 +41,8 @@ import qualified Data.IntMap.Strict as IM
 
 
 import Data.Char     (toLower)
-import Data.List     (intercalate, nubBy, sortBy, sortOn)
+-- import Data.List     (intercalate, nubBy, sortBy, sortOn)
+import Data.List     (intercalate, nubBy)
 import Data.Maybe    (listToMaybe, catMaybes)
 import Data.Function (on)
 
@@ -308,32 +310,40 @@ getModelAtIndex mbi = do
       m@CodeGen           -> error $ "SBV.getModel: Model is not available in mode: " ++ show m
       m@Concrete{}        -> error $ "SBV.getModel: Model is not available in mode: " ++ show m
       SMTMode _ _ isSAT _ -> do
-          cfg   <- getConfig
-          qinps <- getQuantifiedInputs
-          uis   <- getUIs
+          !cfg   <- {-# SCC gm_getConfig #-} getConfig
+          !qinps <- {-# SCC gm_getQI #-} getQuantifiedInputs
+          !uis   <- {-# SCC gm_getUI #-} getUIs
 
            -- for "sat", display the prefix existentials. for "proof", display the prefix universals
-          let allModelInputs = if isSAT then takeWhile ((/= ALL) . fst) qinps
-                                        else takeWhile ((== ALL) . fst) qinps
+          let
+            wasSat,wasNotSat :: [(Quantifier, NamedSymVar)]
+            -- !wasSat = takeWhile ((/= ALL) . fst) qinps
+            -- !wasNotSat = dropWhile ((/= ALL) . fst) qinps -- takeWhile ((== ALL) . fst) qinps
+            (!wasSat, !wasNotSat) = span ((/= ALL) . fst) qinps
+            !allModelInputs = if isSAT
+                                then wasSat
+                                else wasNotSat
 
               -- Add on observables only if we're not in a quantified context
-              grabObservables = length allModelInputs == length qinps -- i.e., we didn't drop anything
+            grabObservables = length allModelInputs == length qinps -- i.e., we didn't drop anything
 
           obsvs <- if grabObservables
-                      then getObservables
-                      else do queryDebug ["*** In a quantified context, obvservables will not be printed."]
-                              return []
+                   then getObservables
+                   else queryDebug ["*** In a quantified context, obvservables will not be printed."] >> return []
 
-          let sortByNodeId :: [(SV, (String, CV))] -> [(String, CV)]
-              sortByNodeId = map snd . sortBy (compare `on` (\(SV _ nid, _) -> nid))
+          -- let sortByNodeId :: [(SV, (String, CV))] -> [(String, CV)]
+          --     sortByNodeId = map snd . sortBy (compare `on` (\(SV _ nid, _) -> nid))
 
-              grab (sv, nm) = wrap <$> getValueCV mbi sv
+          let grab (!sv, !nm) = wrap <$> getValueCV mbi sv
                  where wrap c = (sv, (nm, c))
 
-          inputAssocs <- mapM (grab . snd) allModelInputs
+          !inputAssocs <- {-# SCC "gm_allModelInputs" #-} mapM (grab . snd) allModelInputs
 
-          let assocs =  sortOn fst obsvs
-                     ++ sortByNodeId [p | p@(_, (nm, _)) <- inputAssocs, not (isNonModelVar cfg nm)]
+          -- let assocs =  sortOn fst obsvs
+          --            ++ sortByNodeId [p | p@(_, (nm, _)) <- inputAssocs, not (isNonModelVar cfg nm)]
+          -- let !assocs = M.fromList $ obsvs <> (filter (\(nm,_) -> not (isNonModelVar cfg nm)) . fmap snd $! inputAssocs)
+          let !assocs = M.fromList $! obsvs <> fmap snd inputAssocs
+
 
           -- collect UIs if requested
           let uiFuns = [ui | ui@(_, SBVType as) <- uis, length as > 1, satTrackUFs cfg] -- functions have at least two things in their type!
@@ -818,7 +828,7 @@ mkSMTResult asgns = do
 
              let m = SMTModel { modelObjectives = []
                               , modelBindings   = Nothing
-                              , modelAssocs     = assocs
+                              , modelAssocs     = M.fromList assocs
                               , modelUIFuns     = []
                               }
 

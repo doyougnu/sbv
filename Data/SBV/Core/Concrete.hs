@@ -10,6 +10,7 @@
 -----------------------------------------------------------------------------
 
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE BangPatterns        #-}
 {-# LANGUAGE TypeApplications    #-}
 
 {-# OPTIONS_GHC -Wall -Werror #-}
@@ -125,18 +126,18 @@ instance Eq CVal where
 
 -- | Ord instance for VWVal. Same comments as the 'Eq' instance why this cannot be derived.
 instance Ord CVal where
-  CAlgReal  a `compare` CAlgReal b  = a        `algRealStructuralCompare` b
-  CInteger  a `compare` CInteger b  = a        `compare`                  b
-  CFloat    a `compare` CFloat b    = a        `fpCompareObjectH`         b
-  CDouble   a `compare` CDouble b   = a        `fpCompareObjectH`         b
-  CChar     a `compare` CChar b     = a        `compare`                  b
-  CString   a `compare` CString b   = a        `compare`                  b
-  CList     a `compare` CList   b   = a        `compare`                  b
-  CSet      a `compare` CSet    b   = a        `compareRCSet`             b
-  CUserSort a `compare` CUserSort b = a        `compare`                  b
-  CTuple    a `compare` CTuple    b = a        `compare`                  b
-  CMaybe    a `compare` CMaybe    b = a        `compare`                  b
-  CEither   a `compare` CEither   b = a        `compare`                  b
+  (CAlgReal  !a) `compare` (CAlgReal  !b) = a        `algRealStructuralCompare` b
+  (CInteger  !a) `compare` (CInteger  !b) = a        `compare`                  b
+  (CFloat    !a) `compare` (CFloat    !b) = a        `fpCompareObjectH`         b
+  (CDouble   !a) `compare` (CDouble   !b) = a        `fpCompareObjectH`         b
+  (CChar     !a) `compare` (CChar     !b) = a        `compare`                  b
+  (CString   !a) `compare` (CString   !b) = a        `compare`                  b
+  (CList     !a) `compare` (CList     !b) = a        `compare`                  b
+  (CSet      !a) `compare` (CSet      !b) = a        `compareRCSet`             b
+  (CUserSort !a) `compare` (CUserSort !b) = a        `compare`                  b
+  (CTuple    !a) `compare` (CTuple    !b) = a        `compare`                  b
+  (CMaybe    !a) `compare` (CMaybe    !b) = a        `compare`                  b
+  (CEither   !a) `compare` (CEither   !b) = a        `compare`                  b
   a           `compare` b           = let ra = cvRank a
                                           rb = cvRank b
                                       in if ra == rb
@@ -228,10 +229,12 @@ instance HasKind GeneralizedCV where
 
 -- | Are two CV's of the same type?
 cvSameType :: CV -> CV -> Bool
+{-# SCC cvSameType #-}
 cvSameType x y = kindOf x == kindOf y
 
 -- | Convert a CV to a Haskell boolean (NB. Assumes input is well-kinded)
 cvToBool :: CV -> Bool
+{-# SCC cvToBool #-}
 cvToBool x = cvVal x /= CInteger 0
 
 -- | Normalize a CV. Essentially performs modular arithmetic to make sure the
@@ -239,6 +242,7 @@ cvToBool x = cvVal x /= CInteger 0
 -- negative values, due to asymmetry. (i.e., an 8-bit negative number represents
 -- values in the range -128 to 127; thus we have to be careful on the negative side.)
 normCV :: CV -> CV
+{-# SCC normCV #-}
 normCV c@(CV (KBounded signed sz) (CInteger v)) = c { cvVal = CInteger norm }
  where norm | sz == 0 = 0
 
@@ -253,10 +257,10 @@ normCV c@(CV (KBounded signed sz) (CInteger v)) = c { cvVal = CInteger norm }
 
                            Below is equivalent, and hopefully faster!
                         -}
-                        v .&. (((1 :: Integer) `shiftL` sz) - 1)
-normCV c@(CV KBool (CInteger v)) = c { cvVal = CInteger (v .&. 1) }
+                        v .&. fromIntegral (((1 :: Int) `shiftL` sz) - 1)
+normCV c@(CV KBool (CInteger v)) = let !res = v .&. 1 in
+                                     c { cvVal = CInteger res}
 normCV c                         = c
-{-# INLINE normCV #-}
 
 -- | Constant False as a 'CV'. We represent it using the integer value 0.
 falseCV :: CV
@@ -281,6 +285,7 @@ liftCV :: (AlgReal             -> b)
        -> (Either CVal CVal    -> b)
        -> CV
        -> b
+{-# SCC liftCV #-}
 liftCV f _ _ _ _ _ _ _ _ _ _ _ (CV _ (CAlgReal  v)) = f v
 liftCV _ f _ _ _ _ _ _ _ _ _ _ (CV _ (CInteger  v)) = f v
 liftCV _ _ f _ _ _ _ _ _ _ _ _ (CV _ (CFloat    v)) = f v
@@ -307,6 +312,7 @@ liftCV2 :: (AlgReal             -> AlgReal             -> b)
         -> (Either CVal CVal    -> Either CVal CVal    -> b)
         -> ((Maybe Int, String) -> (Maybe Int, String) -> b)
         -> CV                   -> CV                  -> b
+{-# SCC liftCV2 #-}
 liftCV2 r i f d c s u v m e w x y = case (cvVal x, cvVal y) of
                                       (CAlgReal   a, CAlgReal   b) -> r a b
                                       (CInteger   a, CInteger   b) -> i a b
@@ -331,6 +337,7 @@ mapCV :: (AlgReal             -> AlgReal)
       -> ((Maybe Int, String) -> (Maybe Int, String))
       -> CV
       -> CV
+{-# SCC mapCV #-}
 mapCV r i f d c s u x  = normCV $ CV (kindOf x) $ case cvVal x of
                                                     CAlgReal  a -> CAlgReal  (r a)
                                                     CInteger  a -> CInteger  (i a)
@@ -356,14 +363,15 @@ mapCV2 :: (AlgReal             -> AlgReal             -> AlgReal)
        -> CV
        -> CV
        -> CV
+{-# SCC mapCV2 #-}
 mapCV2 r i f d c s u x y = case (cvSameType x y, cvVal x, cvVal y) of
-                            (True, CAlgReal  a, CAlgReal  b) -> normCV $ CV (kindOf x) (CAlgReal  (r a b))
-                            (True, CInteger  a, CInteger  b) -> normCV $ CV (kindOf x) (CInteger  (i a b))
-                            (True, CFloat    a, CFloat    b) -> normCV $ CV (kindOf x) (CFloat    (f a b))
-                            (True, CDouble   a, CDouble   b) -> normCV $ CV (kindOf x) (CDouble   (d a b))
-                            (True, CChar     a, CChar     b) -> normCV $ CV (kindOf x) (CChar     (c a b))
-                            (True, CString   a, CString   b) -> normCV $ CV (kindOf x) (CString   (s a b))
-                            (True, CUserSort a, CUserSort b) -> normCV $ CV (kindOf x) (CUserSort (u a b))
+                            (True, CAlgReal  a, CAlgReal  b) -> normCV $! CV (kindOf x) (CAlgReal  (r a b))
+                            (True, CInteger  a, CInteger  b) -> normCV $! CV (kindOf x) (CInteger  (i a b))
+                            (True, CFloat    a, CFloat    b) -> normCV $! CV (kindOf x) (CFloat    (f a b))
+                            (True, CDouble   a, CDouble   b) -> normCV $! CV (kindOf x) (CDouble   (d a b))
+                            (True, CChar     a, CChar     b) -> normCV $! CV (kindOf x) (CChar     (c a b))
+                            (True, CString   a, CString   b) -> normCV $! CV (kindOf x) (CString   (s a b))
+                            (True, CUserSort a, CUserSort b) -> normCV $! CV (kindOf x) (CUserSort (u a b))
                             (True, CList{},     CList{})     -> error "Data.SBV.mapCV2: Unexpected call through mapCV2 with lists!"
                             (True, CTuple{},    CTuple{})    -> error "Data.SBV.mapCV2: Unexpected call through mapCV2 with tuples!"
                             (True, CMaybe{},    CMaybe{})    -> error "Data.SBV.mapCV2: Unexpected call through mapCV2 with maybes!"
@@ -381,6 +389,7 @@ instance Show GeneralizedCV where
 
 -- | Show a CV, with kind info if bool is True
 showCV :: Bool -> CV -> String
+{-# SCC showCV #-}
 showCV shk w | isBoolean w = show (cvToBool w) ++ (if shk then " :: Bool" else "")
 showCV shk w               = liftCV show show show show show show snd shL shS shT shMaybe shEither w ++ kInfo
       where kw = kindOf w
@@ -450,6 +459,7 @@ mkConstCV k@KEither{}     a = error $ "Unexpected call to mkConstCV (" ++ show k
 
 -- | Generate a random constant value ('CVal') of the correct kind.
 randomCVal :: Kind -> IO CVal
+{-# SCC randomCVal #-}
 randomCVal k =
   case k of
     KBool              -> CInteger <$> randomRIO (0, 1)
@@ -485,6 +495,7 @@ randomCVal k =
 
 -- | Generate a random constant value ('CV') of the correct kind.
 randomCV :: Kind -> IO CV
+{-# SCC randomCV #-}
 randomCV k = CV k <$> randomCVal k
 
 {-# ANN module ("HLint: ignore Redundant if" :: String) #-}

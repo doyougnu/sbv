@@ -53,7 +53,7 @@ import Data.List (intercalate, isPrefixOf, nub)
 import Data.Maybe (mapMaybe, listToMaybe)
 
 import qualified Data.Map.Strict as M
-import qualified Data.Foldable   as S (toList)
+import qualified Data.Foldable   as S (toList,foldr')
 
 import Data.SBV.Core.Data
 import Data.SBV.Core.Symbolic
@@ -298,7 +298,7 @@ class ExtractIO m => MProvable m a where
                                       vars = case x `M.lookup` mappings of
                                                Nothing            -> []
                                                Just (SBVApp o ss) -> nub (oVars o ++ ss)
-                                  in foldr go sofar vars
+                                  in S.foldr' go sofar vars
                                 where nx = nodeId x
 
                    let needsUniversalOpt = let tag _  [] = Nothing

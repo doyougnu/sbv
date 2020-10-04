@@ -21,6 +21,7 @@ import Data.Either (partitionEithers)
 import Data.List   (isPrefixOf)
 import Data.Maybe  (fromMaybe, listToMaybe)
 import Data.Word   (Word32, Word64)
+import Data.Foldable (foldr')
 
 import Numeric    (readInt, readDec, readHex, fromRat)
 
@@ -42,6 +43,7 @@ data SExpr = ECon    String
 
 -- | Extremely simple minded tokenizer, good for our use model.
 tokenize :: String -> [String]
+{-# SCC tokenize #-}
 tokenize inp = go inp []
  where go "" sofar = reverse sofar
 
@@ -79,6 +81,7 @@ tokenize inp = go inp []
 
 -- | The balance of parens in this string. If 0, this means it's a legit line!
 parenDeficit :: String -> Int
+{-# SCC parenDeficit #-}
 parenDeficit = go 0 . tokenize
   where go :: Int -> [String] -> Int
         go !balance []           = balance
@@ -88,6 +91,7 @@ parenDeficit = go 0 . tokenize
 
 -- | Parse a string into an SExpr, potentially failing with an error message
 parseSExpr :: String -> Either String SExpr
+{-# SCC parseSExpr #-}
 parseSExpr inp = do (sexp, extras) <- parse inpToks
                     if null extras
                        then case sexp of
@@ -223,6 +227,7 @@ parseSExpr inp = do (sexp, extras) <- parse inpToks
 
 -- | Parses the Z3 floating point formatted numbers like so: 1.321p5/1.2123e9 etc.
 rdFP :: (Read a, RealFloat a) => String -> Maybe a
+{-# SCC rdFP #-}
 rdFP s = case break (`elem` "pe") s of
            (m, 'p':e) -> rd m >>= \m' -> rd e >>= \e' -> return $ m' * ( 2 ** e')
            (m, 'e':e) -> rd m >>= \m' -> rd e >>= \e' -> return $ m' * (10 ** e')
@@ -234,25 +239,28 @@ rdFP s = case break (`elem` "pe") s of
 
 -- | Convert an (s, e, m) triple to a float value
 getTripleFloat :: Integer -> Integer -> Integer -> Float
+{-# SCC getTripleFloat #-}
 getTripleFloat s e m = wordToFloat w32
   where sign      = [s == 1]
         expt      = [e `testBit` i | i <- [ 7,  6 .. 0]]
         mantissa  = [m `testBit` i | i <- [22, 21 .. 0]]
         positions = [i | (i, b) <- zip [31, 30 .. 0] (sign ++ expt ++ mantissa), b]
-        w32       = foldr (flip setBit) (0::Word32) positions
+        w32       = foldr' (flip setBit) (0::Word32) positions
 
 -- | Convert an (s, e, m) triple to a float value
 getTripleDouble :: Integer -> Integer -> Integer -> Double
+{-# SCC getTripleDouble #-}
 getTripleDouble s e m = wordToDouble w64
   where sign      = [s == 1]
         expt      = [e `testBit` i | i <- [10,  9 .. 0]]
         mantissa  = [m `testBit` i | i <- [51, 50 .. 0]]
         positions = [i | (i, b) <- zip [63, 62 .. 0] (sign ++ expt ++ mantissa), b]
-        w64       = foldr (flip setBit) (0::Word64) positions
+        w64       = foldr' (flip setBit) (0::Word64) positions
 
 -- | Special constants of SMTLib2 and their internal translation. Mainly
 -- rounding modes for now.
 constantMap :: String -> String
+{-# SCC constantMap #-}
 constantMap n = fromMaybe n (listToMaybe [to | (from, to) <- special, n `elem` from])
  where special = [ (["RNE", "roundNearestTiesToEven"], show RoundNearestTiesToEven)
                  , (["RNA", "roundNearestTiesToAway"], show RoundNearestTiesToAway)
@@ -264,6 +272,7 @@ constantMap n = fromMaybe n (listToMaybe [to | (from, to) <- special, n `elem` f
 -- | Parse a function like value. These come in two flavors: Either in the form of
 -- a store-expression or a lambda-expression. So we handle both here.
 parseSExprFunction :: SExpr -> Maybe (Either String ([([SExpr], SExpr)], SExpr))
+{-# SCC parseSExprFunction #-}
 parseSExprFunction e
   | Just r <- parseLambdaExpression  e = Just (Right r)
   | Just r <- parseStoreAssociations e = Just r
@@ -274,6 +283,7 @@ parseSExprFunction e
 -- be flexible, this is certainly not a full fledged parser. But hopefully it'll
 -- cover everything z3 will throw at it.
 parseLambdaExpression :: SExpr -> Maybe ([([SExpr], SExpr)], SExpr)
+{-# SCC parseLambdaExpression #-}
 parseLambdaExpression funExpr = case funExpr of
                                   EApp [ECon "lambda", EApp params, body] -> mapM getParam params >>= flip lambda body >>= chainAssigns
                                   _                                       -> Nothing
@@ -339,7 +349,7 @@ parseLambdaExpression funExpr = case funExpr of
                         build :: SExpr -> [(String, SExpr)] -> Maybe [(String, SExpr)]
                         build (EApp (ECon "and" : rest)) sofar = let next _ Nothing  = Nothing
                                                                      next c (Just x) = build c x
-                                                                 in foldr next (Just sofar) rest
+                                                                 in foldr' next (Just sofar) rest
 
                         build expr sofar | Just (v, r) <- grok expr, v `elem` params = Just $ (v, r) : sofar
                                          | True                                      = Nothing
@@ -369,6 +379,7 @@ parseLambdaExpression funExpr = case funExpr of
 --
 -- So, we specifically handle that here, by returning a Left of that name.
 parseStoreAssociations :: SExpr -> Maybe (Either String ([([SExpr], SExpr)], SExpr))
+{-# SCC parseStoreAssociations #-}
 parseStoreAssociations (EApp [ECon "_", ECon "as-array", ECon nm]) = Just $ Left nm
 parseStoreAssociations e                                           = Right <$> (chainAssigns =<< vals e)
     where vals :: SExpr -> Maybe [Either ([SExpr], SExpr) SExpr]
@@ -380,6 +391,7 @@ parseStoreAssociations e                                           = Right <$> (
 
 -- | Turn a sequence of left-right chain assignments (condition + free) into a single chain
 chainAssigns :: [Either ([SExpr], SExpr) SExpr] -> Maybe ([([SExpr], SExpr)], SExpr)
+{-# SCC chainAssigns #-}
 chainAssigns chain = regroup $ partitionEithers chain
   where regroup (vs, [d]) = Just (checkDup vs, d)
         regroup _         = Nothing

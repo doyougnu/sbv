@@ -13,6 +13,7 @@
 {-# LANGUAGE DefaultSignatures          #-}
 {-# LANGUAGE DeriveDataTypeable         #-}
 {-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE FunctionalDependencies     #-}
 {-# LANGUAGE GADTs                      #-}
@@ -22,6 +23,7 @@
 {-# LANGUAGE Rank2Types                 #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TupleSections              #-}
+{-# LANGUAGE BangPatterns               #-}
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE UndecidableInstances       #-} -- for undetermined s in MonadState
 
@@ -58,7 +60,7 @@ module Data.SBV.Core.Symbolic
   ) where
 
 import Control.Arrow               (first, second, (***))
-import Control.DeepSeq             (NFData(..))
+import Control.DeepSeq             (NFData(..),force, deepseq)
 import Control.Monad               (when)
 import Control.Monad.Except        (MonadError, ExceptT)
 import Control.Monad.Reader        (MonadReader(..), ReaderT, runReaderT,
@@ -76,6 +78,7 @@ import Data.String                 (IsString(fromString))
 import Data.Time (getCurrentTime, UTCTime)
 
 import GHC.Stack
+import GHC.Generics (Generic)
 
 import qualified Control.Monad.State.Lazy    as LS
 import qualified Control.Monad.State.Strict  as SS
@@ -88,6 +91,7 @@ import qualified Data.Map.Strict             as Map  (Map, empty, toList, lookup
 import qualified Data.Set                    as Set  (Set, empty, toList, insert, member)
 import qualified Data.Foldable               as F    (toList)
 import qualified Data.Sequence               as S    (Seq, empty, (|>))
+import qualified Data.Text                   as T
 
 import System.Mem.StableName
 
@@ -104,7 +108,7 @@ import Control.Monad.Fail as Fail
 #endif
 
 -- | A symbolic node id
-newtype NodeId = NodeId Int deriving (Eq, Ord)
+data NodeId = NodeId {-# UNPACK #-} !Int deriving (Eq, Ord)
 
 -- | A symbolic word, tracking it's signedness and size.
 data SV = SV !Kind !NodeId
@@ -115,7 +119,7 @@ instance Eq SV where
 
 -- | Again, simply use the node-id for ordering
 instance Ord SV where
-  SV _ n1 `compare` SV _ n2 = n1 `compare` n2
+  (SV _ !n1) `compare` (SV _ !n2) = n1 `compare` n2
 
 instance HasKind SV where
   kindOf (SV k _) = k
@@ -323,17 +327,17 @@ data StrOp = StrConcat       -- ^ Concatenation of one or more strings
 -- some string-representation; there are way too many alternatives
 -- already so inventing one isn't a priority. Please get in touch if you
 -- would like a parser for this type as it might be easier to use.
-data RegExp = Literal String       -- ^ Precisely match the given string
+data RegExp = Literal !String       -- ^ Precisely match the given string
             | All                  -- ^ Accept every string
             | None                 -- ^ Accept no strings
-            | Range Char Char      -- ^ Accept range of characters
-            | Conc  [RegExp]       -- ^ Concatenation
-            | KStar RegExp         -- ^ Kleene Star: Zero or more
-            | KPlus RegExp         -- ^ Kleene Plus: One or more
-            | Opt   RegExp         -- ^ Zero or one
-            | Loop  Int Int RegExp -- ^ From @n@ repetitions to @m@ repetitions
-            | Union [RegExp]       -- ^ Union of regular expressions
-            | Inter RegExp RegExp  -- ^ Intersection of regular expressions
+            | Range !Char !Char      -- ^ Accept range of characters
+            | Conc  ![RegExp]       -- ^ Concatenation
+            | KStar !RegExp         -- ^ Kleene Star: Zero or more
+            | KPlus !RegExp         -- ^ Kleene Plus: One or more
+            | Opt   !RegExp         -- ^ Zero or one
+            | Loop  !Int !Int !RegExp -- ^ From @n@ repetitions to @m@ repetitions
+            | Union ![RegExp]       -- ^ Union of regular expressions
+            | Inter !RegExp !RegExp  -- ^ Intersection of regular expressions
             deriving (Eq, Ord)
 
 -- | With overloaded strings, we can have direct literal regular expressions.
@@ -578,7 +582,8 @@ instance Show SBVExpr where
 newtype SBVPgm = SBVPgm {pgmAssignments :: S.Seq (SV, SBVExpr)}
 
 -- | 'NamedSymVar' pairs symbolic values and user given/automatically generated names
-type NamedSymVar = (SV, String)
+data NamedSymVar = NamedSymVar !SV !T.Text
+                 deriving Show
 
 -- | Style of optimization. Note that in the pareto case the user is allowed
 -- to specify a max number of fronts to query the solver for, since there might
@@ -920,46 +925,80 @@ withNewIncState :: State -> (State -> IO a) -> IO (IncState, a)
 withNewIncState st cont = do
         is <- newIncState
         R.modifyIORef' (rIncState st) (const is)
-        r  <- cont st
-        finalIncState <- readIORef (rIncState st)
+        !r  <- cont st
+        !finalIncState <- readIORef (rIncState st)
         return (finalIncState, r)
 
 -- | The state of the symbolic interpreter
-data State  = State { pathCond     :: SVal                             -- ^ kind KBool
-                    , startTime    :: UTCTime
-                    , runMode      :: IORef SBVRunMode
-                    , rIncState    :: IORef IncState
-                    , rCInfo       :: IORef [(String, CV)]
-                    , rObservables :: IORef [(String, CV -> Bool, SV)]
-                    , rctr         :: IORef Int
-                    , rUsedKinds   :: IORef KindSet
-                    , rUsedLbls    :: IORef (Set.Set String)
-                    , rinps        :: IORef (([(Quantifier, NamedSymVar)], [NamedSymVar]), Set.Set String) -- First : User defined, with proper quantifiers
+data State  = State { pathCond     :: !SVal                             -- ^ kind KBool
+                    , startTime    :: !UTCTime
+                    , runMode      :: !(IORef SBVRunMode)
+                    , rIncState    :: !(IORef IncState)
+                    , rCInfo       :: !(IORef [(String, CV)])
+                    , rObservables :: !(IORef [(String, CV -> Bool, SV)])
+                    , rctr         :: !(IORef Int)
+                    , rUsedKinds   :: !(IORef KindSet)
+                    , rUsedLbls    :: !(IORef (Set.Set String))
+                    , rinps        :: !(IORef (([(Quantifier, NamedSymVar)], [NamedSymVar]), Set.Set String)) -- First : User defined, with proper quantifiers
                                                                                                            -- Second: Internally declared, always existential
                                                                                                            -- Third : Entire set of names, for faster lookup
-                    , rConstraints :: IORef (S.Seq (Bool, [(String, String)], SV))
-                    , routs        :: IORef [SV]
-                    , rtblMap      :: IORef TableMap
-                    , spgm         :: IORef SBVPgm
-                    , rconstMap    :: IORef CnstMap
-                    , rexprMap     :: IORef ExprMap
-                    , rArrayMap    :: IORef ArrayMap
-                    , rFArrayMap   :: IORef FArrayMap
-                    , rUIMap       :: IORef UIMap
-                    , rCgMap       :: IORef CgMap
-                    , raxioms      :: IORef [(String, [String])]
-                    , rSMTOptions  :: IORef [SMTOption]
-                    , rOptGoals    :: IORef [Objective (SV, SV)]
-                    , rAsserts     :: IORef [(String, Maybe CallStack, SV)]
-                    , rSVCache     :: IORef (Cache SV)
-                    , rAICache     :: IORef (Cache ArrayIndex)
-                    , rFAICache    :: IORef (Cache FArrayIndex)
-                    , rQueryState  :: IORef (Maybe QueryState)
-                    }
+                    , rConstraints :: !(IORef (S.Seq (Bool, [(String, String)], SV)))
+                    , routs        :: !(IORef [SV])
+                    , rtblMap      :: !(IORef TableMap)
+                    , spgm         :: !(IORef SBVPgm)
+                    , rconstMap    :: !(IORef CnstMap)
+                    , rexprMap     :: !(IORef ExprMap)
+                    , rArrayMap    :: !(IORef ArrayMap)
+                    , rFArrayMap   :: !(IORef FArrayMap)
+                    , rUIMap       :: !(IORef UIMap)
+                    , rCgMap       :: !(IORef CgMap)
+                    , raxioms      :: !(IORef [(String, [String])])
+                    , rSMTOptions  :: !(IORef [SMTOption])
+                    , rOptGoals    :: !(IORef [Objective (SV, SV)])
+                    , rAsserts     :: !(IORef [(String, Maybe CallStack, SV)])
+                    , rSVCache     :: !(IORef (Cache SV))
+                    , rAICache     :: !(IORef (Cache ArrayIndex))
+                    , rFAICache    :: !(IORef (Cache FArrayIndex))
+                    , rQueryState  :: !(IORef (Maybe QueryState))
+                    } deriving (Generic)
 
 -- NFData is a bit of a lie, but it's sufficient, most of the content is iorefs that we don't want to touch
+-- instance NFData State where
+--    rnf State{} =
 instance NFData State where
-   rnf State{} = ()
+  rnf State {} =
+    rnf pathCond `deepseq`
+    rnf startTime `deepseq`
+    rnf runMode `deepseq`
+    rnf rIncState `deepseq`
+    rnf rCInfo `deepseq`
+    rnf rctr `deepseq`
+    rnf rinps `deepseq` rnf rObservables `deepseq` rnf rUsedLbls `deepseq` rnf rUsedKinds
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 -- | Get the current path condition
 getSValPathCondition :: State -> SVal
@@ -1035,9 +1074,10 @@ noInteractiveEver ss = error $ unlines $  ""
 -- to also perform extra operation in interactive mode. (Typically error out, but also simply
 -- ignore if it has no impact.)
 modifyState :: State -> (State -> IORef a) -> (a -> a) -> IO () -> IO ()
+{-# INLINE modifyState #-}
 modifyState st@State{runMode} field update interactiveUpdate = do
-        R.modifyIORef' (field st) update
-        rm <- readIORef runMode
+        R.modifyIORef' (field st) (force update)
+        !rm <- readIORef runMode
         case rm of
           SMTMode _ IRun _ _ -> interactiveUpdate
           _                  -> return ()
@@ -1045,12 +1085,12 @@ modifyState st@State{runMode} field update interactiveUpdate = do
 -- | Modify the incremental state
 modifyIncState  :: State -> (IncState -> IORef a) -> (a -> a) -> IO ()
 modifyIncState State{rIncState} field update = do
-        incState <- readIORef rIncState
+        !incState <- readIORef rIncState
         R.modifyIORef' (field incState) update
 
 -- | Add an observable
 recordObservable :: State -> String -> (CV -> Bool) -> SV -> IO ()
-recordObservable st nm chk sv = modifyState st rObservables ((nm, chk, sv):) (return ())
+recordObservable st !nm !chk !sv = modifyState st rObservables ((nm, chk, sv):) (return ())
 
 -- | Increment the variable counter
 incrementInternalCounter :: State -> IO Int
@@ -1100,7 +1140,7 @@ newUninterpreted st nm t mbCode
 
 -- | Add a new sAssert based constraint
 addAssertion :: State -> Maybe CallStack -> String -> SV -> IO ()
-addAssertion st cs msg cond = modifyState st rAsserts ((msg, cs, cond):)
+addAssertion !st !cs !msg !cond = modifyState st rAsserts ((msg, cs, cond):)
                                         $ noInteractive [ "Named assertions (sAssert):"
                                                         , "  Tag: " ++ msg
                                                         , "  Loc: " ++ maybe "Unknown" show cs
@@ -1110,25 +1150,24 @@ addAssertion st cs msg cond = modifyState st rAsserts ((msg, cs, cond):)
 -- Such variables are existentially quantified in a SAT context, and universally quantified
 -- in a proof context.
 internalVariable :: State -> Kind -> IO SV
-internalVariable st k = do (sv, nm) <- newSV st k
-                           rm <- readIORef (runMode st)
+internalVariable st k = do (!sv, !nm) <- newSV st k
+                           !rm <- readIORef (runMode st)
                            let q = case rm of
                                      SMTMode  _ _ True  _ -> EX
                                      SMTMode  _ _ False _ -> ALL
                                      CodeGen              -> ALL
                                      Concrete{}           -> ALL
-                               n = "__internal_sbv_" ++ nm
-                               v = (sv, n)
+                               !n = "__internal_sbv_" ++ nm
+                               !v = (sv, n)
                            modifyState st rinps (first ((q, v) :) *** Set.insert n)
-                                     $ modifyIncState st rNewInps (\newInps -> case q of
-                                                                                 EX -> v : newInps
-                                                                                 -- I don't think the following can actually happen
-                                                                                 -- but just be safe:
-                                                                                 ALL  -> noInteractive [ "Internal universally quantified variable creation:"
-                                                                                                       , "  Named: " ++ nm
-                                                                                                       ])
+                                     $! modifyIncState st rNewInps (\(!newInps) -> case q of
+                                                                                   EX -> v : newInps
+                                                                                   -- I don't think the following can actually happen
+                                                                                   -- but just be safe:
+                                                                                   ALL  -> noInteractive [ "Internal universally quantified variable creation:"
+                                                                                                         , "  Named: " ++ nm
+                                                                                                         ])
                            return sv
-{-# INLINE internalVariable #-}
 
 -- | Create a new SV
 newSV :: State -> Kind -> IO (SV, String)
@@ -1136,7 +1175,6 @@ newSV st k = do ctr <- incrementInternalCounter st
                 let sv = SV k (NodeId ctr)
                 registerKind st k
                 return (sv, 's' : show ctr)
-{-# INLINE newSV #-}
 
 -- | Register a new kind with the system, used for uninterpreted sorts.
 -- NB: Is it safe to have new kinds in query mode? It could be that
@@ -1210,18 +1248,17 @@ registerLabel whence st nm
 
 -- | Create a new constant; hash-cons as necessary
 newConst :: State -> CV -> IO SV
-newConst st c = do
+newConst st !c = do
   constMap <- readIORef (rconstMap st)
   case c `Map.lookup` constMap of
     -- NB. Unlike in 'newExpr', we don't have to make sure the returned sv
     -- has the kind we asked for, because the constMap stores the full CV
     -- which already has a kind field in it.
-    Just sv -> return sv
-    Nothing -> do (sv, _) <- newSV st (kindOf c)
-                  let ins = Map.insert c sv
-                  modifyState st rconstMap ins $ modifyIncState st rNewConsts ins
+    Just !sv -> return sv
+    Nothing -> do (!sv, !_) <- newSV st (kindOf c)
+                  let !ins = Map.insert c sv
+                  modifyState st rconstMap ins $! modifyIncState st rNewConsts ins
                   return sv
-{-# INLINE newConst #-}
 
 -- | Create a new table; hash-cons as necessary
 getTableIndex :: State -> Kind -> Kind -> [SV] -> IO Int
@@ -1247,12 +1284,11 @@ newExpr st k app = do
      -- get the same expression but at a different type. See
      -- <http://github.com/GaloisInc/cryptol/issues/566> as an example.
      Just sv | kindOf sv == k -> return sv
-     _                        -> do (sv, _) <- newSV st k
-                                    let append (SBVPgm xs) = SBVPgm (xs S.|> (sv, e))
+     _                        -> do (!sv, _) <- newSV st k
+                                    let append (SBVPgm !xs) = SBVPgm (xs S.|> (sv, e))
                                     modifyState st spgm append $ modifyIncState st rNewAsgns append
                                     modifyState st rexprMap (Map.insert e sv) (return ())
                                     return sv
-{-# INLINE newExpr #-}
 
 -- | Convert a symbolic value to an internal SV
 svToSV :: State -> SVal -> IO SV
@@ -1261,8 +1297,8 @@ svToSV st (SVal _ (Right f)) = uncache f st
 
 -- | Generalization of 'Data.SBV.svToSymSV'
 svToSymSV :: MonadSymbolic m => SVal -> m SV
-svToSymSV sbv = do st <- symbolicEnv
-                   liftIO $ svToSV st sbv
+svToSymSV sbv = do !st <- symbolicEnv
+                   liftIO $! svToSV st sbv
 
 -------------------------------------------------------------------------
 -- * Symbolic Computations
@@ -1688,13 +1724,13 @@ uncacheFAI = uncacheGen rFAICache
 -- | Generic uncaching. Note that this is entirely safe, since we do it in the IO monad.
 uncacheGen :: (State -> IORef (Cache a)) -> Cached a -> State -> IO a
 uncacheGen getCache (Cached f) st = do
-        let rCache = getCache st
-        stored <- readIORef rCache
-        sn <- f `seq` makeStableName f
-        let h = hashStableName sn
+        let !rCache = getCache st
+        !stored <- readIORef rCache
+        !sn <- f `seq` makeStableName f
+        let !h = hashStableName sn
         case (h `IMap.lookup` stored) >>= (sn `lookup`) of
-          Just r  -> return r
-          Nothing -> do r <- f st
+          Just !r  -> return r
+          Nothing -> do !r <- f st
                         r `seq` R.modifyIORef' rCache (IMap.insertWith (++) h [(sn, r)])
                         return r
 
@@ -1861,7 +1897,7 @@ instance NFData SMTConfig where
 data SMTModel = SMTModel {
        modelObjectives :: [(String, GeneralizedCV)]                     -- ^ Mapping of symbolic values to objective values.
      , modelBindings   :: Maybe [((Quantifier, NamedSymVar), Maybe CV)] -- ^ Mapping of input variables as reported by the solver. Only collected if model validation is requested.
-     , modelAssocs     :: [(String, CV)]                                -- ^ Mapping of symbolic values to constants.
+     , modelAssocs     :: Map.Map String CV                                -- ^ Mapping of symbolic values to constants.
      , modelUIFuns     :: [(String, (SBVType, ([([CV], CV)], CV)))]     -- ^ Mapping of uninterpreted functions to association lists in the model.
                                                                         -- Note that an uninterpreted constant (function of arity 0) will be stored
                                                                         -- in the 'modelAssocs' field.
