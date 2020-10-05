@@ -291,12 +291,12 @@ class ExtractIO m => MProvable m a where
                        mappings :: M.Map SV SBVExpr
                        mappings = M.fromList (S.toList (pgmAssignments spgm))
 
-                       chaseUniversal :: SV -> [NamedSymVar]
+                       chaseUniversal :: SV -> [String]
                        chaseUniversal entry = go entry []
                          where
                            go x !sofar
                                 | nx >= firstUniversal
-                                = nub $! [unm | unm <- universals, nx >= nodeId (getSV unm)] ++ sofar
+                                = nub $! [getUserName' unm | unm <- universals, nx >= nodeId (getSV unm)] ++ sofar
                                 | True
                                 = let oVars (LkUp _ a b)             = [a, b]
                                       oVars (IEEEFP (FP_Cast _ _ o)) = [o]
@@ -309,7 +309,7 @@ class ExtractIO m => MProvable m a where
 
                    let needsUniversalOpt = let tag _  [] = Nothing
                                                tag nm xs = Just (nm, xs)
-                                               needsUniversal :: Objective (SV, SV) -> Maybe (String, [NamedSymVar])
+                                               needsUniversal :: Objective (SV, SV) -> Maybe (String, [String])
                                                needsUniversal (Maximize          nm (x, _))   = tag nm (chaseUniversal x)
                                                needsUniversal (Minimize          nm (x, _))   = tag nm (chaseUniversal x)
                                                needsUniversal (AssertWithPenalty nm (x, _) _) = tag nm (chaseUniversal x)

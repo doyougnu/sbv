@@ -34,6 +34,7 @@ module Data.SBV.Control.Query (
 
 import Control.Monad          (unless, when, zipWithM)
 import Control.Monad.IO.Class (MonadIO)
+-- import Control.DeepSeq ((<$!>))
 
 import Data.IORef (readIORef)
 
@@ -336,7 +337,9 @@ getModelAtIndex mbi = do
           --     sortByNodeId = map snd . sortBy (compare `on` (\(SV _ nid, _) -> nid))
 
           let grab (NamedSymVar sv nm) = wrap <$> getValueCV mbi sv
-                 where wrap c = (sv, ((unpack nm), c))
+                 where wrap !c = let !sv' = sv
+                                     !nm' = unpack nm
+                                     in (sv', (nm', c))
 
           !inputAssocs <- {-# SCC "gm_allModelInputs" #-} mapM (grab . snd) allModelInputs
 
