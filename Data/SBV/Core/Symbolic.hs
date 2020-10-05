@@ -48,6 +48,7 @@ module Data.SBV.Core.Symbolic
   , NamedSymVar(..), getSV, getUserName, getUserName'
   , getSValPathCondition, extendSValPathCondition
   , getTableIndex
+  , Inputs(..), getInputs, userInpsToList, internInpsToList, getExistentials, getForAlls, lookupUserInputs
   , SBVPgm(..), MonadSymbolic(..), SymbolicT, Symbolic, runSymbolic, State(..), withNewIncState, IncState(..), incrementInternalCounter
   , inSMTMode, SBVRunMode(..), IStage(..), Result(..)
   , registerKind, registerLabel, recordObservable
@@ -89,7 +90,7 @@ import qualified Control.Monad.Writer.Strict as SW
 import qualified Data.IORef                  as R    (modifyIORef')
 import qualified Data.Generics               as G    (Data(..))
 import qualified Data.IntMap.Strict          as IMap (IntMap, empty, toAscList, lookup, insertWith)
-import qualified Data.Map.Strict             as Map  (Map, empty, toList, lookup, insert, adjust, size)
+import qualified Data.Map.Strict             as Map  (Map, empty, toList, lookup, insert, adjust, size, findWithDefault)
 import qualified Data.Set                    as Set  (Set, empty, toList, insert, member)
 import qualified Data.Foldable               as F    (toList)
 import qualified Data.Sequence               as S    (Seq, empty, (|>))
@@ -1012,13 +1013,25 @@ addUserInput q sv nm = goAll . goUser
 getInputs :: Inputs -> (UserInps, InternInps)
 getInputs Inputs{..} = (userInps, internInps)
 
+lookupUserInputs :: Quantifier -> UserInps -> S.Seq NamedSymVar
+lookupUserInputs = Map.findWithDefault mempty
+
+getExistentials :: UserInps -> S.Seq (Quantifier, NamedSymVar)
+getExistentials = fmap (EX,) . lookupUserInputs EX
+
+getForAlls :: UserInps -> S.Seq (Quantifier, NamedSymVar)
+getForAlls = fmap (ALL,) . lookupUserInputs ALL
+
 inpsToLists :: Inputs -> ([(Quantifier, NamedSymVar)], [NamedSymVar])
-inpsToLists is =  (user, interns)
-  where
-    user'   :: [(Quantifier, [NamedSymVar])]
-    interns :: [NamedSymVar]
-    (user',interns) = ((Map.toList . fmap F.toList) *** Set.toList) $ getInputs is
-    user  = concatMap (\(q, xs) -> fmap (q,) xs) user'
+inpsToLists =  (userInpsToList *** internInpsToList) . getInputs
+
+-- TODO remove these functions once lists have been pushed to edges of code base
+-- | helper functions around inputs
+userInpsToList :: UserInps -> [(Quantifier, NamedSymVar)]
+userInpsToList = concatMap (\(q,xs) -> fmap (q,) xs) . Map.toList . fmap F.toList
+
+internInpsToList :: InternInps -> [NamedSymVar]
+internInpsToList = Set.toList
 
 -- | The state of the symbolic interpreter
 data State  = State { pathCond     :: !SVal                             -- ^ kind KBool

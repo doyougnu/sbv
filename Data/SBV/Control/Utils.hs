@@ -51,6 +51,7 @@ import Data.Proxy
 import qualified Data.Map.Strict    as Map
 import qualified Data.IntMap.Strict as IMap
 import qualified Data.Sequence      as S
+import qualified Data.Foldable      as F (toList)
 
 import Control.Monad            (join, unless, zipWithM, when, replicateM)
 import Control.Monad.IO.Class   (MonadIO, liftIO)
@@ -81,7 +82,8 @@ import Data.SBV.Core.Symbolic ( IncState(..), withNewIncState, State(..), svToSV
                               , registerLabel, svMkSymVar, validationRequested
                               , isSafetyCheckingIStage, isSetupIStage, isRunIStage, IStage(..), QueryT(..)
                               , extractSymbolicSimulationState, MonadSymbolic(..), newUninterpreted
-                              , NamedSymVar(..),getSV,getUserName'
+                              , NamedSymVar(..), getSV, getUserName', getInputs
+                              , getExistentials, getForAlls, userInps, lookupUserInputs
                               )
 
 import Data.SBV.Core.AlgReals   (mergeAlgReals, AlgReal(..), RealPoint(..))
@@ -1067,13 +1069,14 @@ checkSatUsing cmd = do let bad = unexpected "checkSat" cmd "one of sat/unsat/unk
 getQuantifiedInputs :: (MonadIO m, MonadQuery m) => m [(Quantifier, NamedSymVar)]
 {-# SCC getQuantifiedInputs #-}
 getQuantifiedInputs = do State{rinps} <- force <$> queryState
-                         ((!rQinps, !rTrackers), _) <- liftIO $! readIORef rinps
+                         (!rQinps, !rTrackers) <- liftIO $ getInputs <$> readIORef rinps
 
-                         let !qinps    = reverse rQinps
-                             !trackers = map (EX,) $ reverse rTrackers
+                         let !trackers = fmap (EX,) . F.toList $ rTrackers
+                             !preQs    = F.toList $! getExistentials rQinps
+                             !postQs   = F.toList $! getForAlls rQinps
 
                              -- separate the existential prefix, which will go first
-                             (!preQs, !postQs) = span (\(!q, _) -> force (q == EX)) qinps
+                             -- (!preQs, !postQs) = span (\(!q, _) -> force (q == EX)) qinps
 
                          return $! preQs <> trackers <> postQs
 
@@ -1535,8 +1538,9 @@ executeQuery queryContext (QueryT userQuery) = do
                     case queryContext of
                       QueryInternal -> return ()         -- we're good, internal usages don't mess with scopes
                       QueryExternal -> do
-                        ((userInps, _), _) <- readIORef (rinps st)
-                        let badInps = {-# SCC "exQ_badInps" #-}reverse [n | (ALL, nm) <- userInps, let n = getUserName' nm]
+                        userInps <- lookupUserInputs ALL . userInps <$> readIORef (rinps st)
+                        -- let badInps = {-# SCC "exQ_badInps" #-}reverse [n | (ALL, nm) <- userInps, let n = getUserName' nm]
+                        let badInps = F.toList $ fmap getUserName' userInps
                         case badInps of
                           [] -> return ()
                           _  -> let plu | length badInps > 1 = "s require"
