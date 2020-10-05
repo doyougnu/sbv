@@ -19,6 +19,7 @@
 {-# LANGUAGE GADTs                      #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NamedFieldPuns             #-}
+{-# LANGUAGE RecordWildCards            #-}
 {-# LANGUAGE PatternGuards              #-}
 {-# LANGUAGE Rank2Types                 #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
@@ -60,8 +61,8 @@ module Data.SBV.Core.Symbolic
   , validationRequested, outputSVal
   ) where
 
-import Control.Arrow               (first, second, (***))
-import Control.DeepSeq             (NFData(..),force, deepseq)
+import Control.Arrow               ((***))
+import Control.DeepSeq             (NFData(..),force)
 import Control.Monad               (when)
 import Control.Monad.Except        (MonadError, ExceptT)
 import Control.Monad.Reader        (MonadReader(..), ReaderT, runReaderT,
@@ -88,7 +89,7 @@ import qualified Control.Monad.Writer.Strict as SW
 import qualified Data.IORef                  as R    (modifyIORef')
 import qualified Data.Generics               as G    (Data(..))
 import qualified Data.IntMap.Strict          as IMap (IntMap, empty, toAscList, lookup, insertWith)
-import qualified Data.Map.Strict             as Map  (Map, empty, toList, lookup, insert, size)
+import qualified Data.Map.Strict             as Map  (Map, empty, toList, lookup, insert, adjust, size)
 import qualified Data.Set                    as Set  (Set, empty, toList, insert, member)
 import qualified Data.Foldable               as F    (toList)
 import qualified Data.Sequence               as S    (Seq, empty, (|>))
@@ -529,7 +530,7 @@ instance Show Op where
 
 -- | Quantifiers: forall or exists. Note that we allow
 -- arbitrary nestings.
-data Quantifier = ALL | EX deriving Eq
+data Quantifier = ALL | EX deriving (Eq,Ord)
 
 -- | Show instance for 'Quantifier'
 instance Show Quantifier where
@@ -584,11 +585,14 @@ newtype SBVPgm = SBVPgm {pgmAssignments :: S.Seq (SV, SBVExpr)}
 
 -- | 'NamedSymVar' pairs symbolic values and user given/automatically generated names
 type UserName = T.Text
-data NamedSymVar = NamedSymVar !SV !T.Text
+data NamedSymVar = NamedSymVar !SV !UserName
                  deriving (Eq,Ord,Show,Generic)
 
-toNamedSV :: SV -> String -> NamedSymVar
-toNamedSV s = NamedSymVar s . T.pack
+toNamedSV' :: SV -> String -> NamedSymVar
+toNamedSV' s = NamedSymVar s . T.pack
+
+toNamedSV :: SV -> T.Text -> NamedSymVar
+toNamedSV = NamedSymVar
 
 getSV :: NamedSymVar -> SV
 getSV (NamedSymVar s _) = s
@@ -944,6 +948,78 @@ withNewIncState st cont = do
         !finalIncState <- readIORef (rIncState st)
         return (finalIncState, r)
 
+-- | User inputs partitioned by quantifier
+type UserInps   = Map.Map Quantifier (S.Seq NamedSymVar)
+type InternInps = Set.Set NamedSymVar
+type AllInps    = Set.Set UserName
+
+-- | Inputs as a record of maps and sets
+data Inputs = Inputs { userInps   :: !UserInps
+                     , internInps :: !InternInps
+                     , allInps    :: !AllInps
+                     } deriving (Eq,Ord,Show)
+
+instance Semigroup Inputs where
+  (Inputs lui lii lai) <> (Inputs rui rii rai) =
+    let userInps   = lui <> rui
+        internInps = lii <> rii
+        allInps    = lai <> rai
+        in Inputs {..}
+
+instance Monoid Inputs where
+  mempty = Inputs { userInps   = mempty
+                  , internInps = mempty
+                  , allInps    = mempty
+                  }
+
+-- | avoiding lens dependency
+onUserInps :: (UserInps -> UserInps) -> Inputs -> Inputs
+onUserInps f Inputs{..} = Inputs{ userInps   = f userInps
+                                , internInps = internInps
+                                , allInps    = allInps
+                                }
+
+onInternInps :: (InternInps -> InternInps) -> Inputs -> Inputs
+onInternInps f Inputs{..} = Inputs{ userInps   = userInps
+                                  , internInps = f internInps
+                                  , allInps    = allInps
+                                  }
+
+onAllInps :: (AllInps -> AllInps) -> Inputs -> Inputs
+onAllInps f Inputs{..} = Inputs{ userInps   = userInps
+                               , internInps = internInps
+                               , allInps    = f allInps
+                               }
+
+addInternInput :: SV -> UserName -> Inputs -> Inputs
+addInternInput sv nm = goAll . goIntern
+  where !new = toNamedSV sv nm
+        goIntern = onInternInps (Set.insert new)
+        goAll    = onAllInps    (Set.insert nm)
+
+addUserInput :: Quantifier -> SV -> UserName -> Inputs -> Inputs
+addUserInput q sv nm = goAll . goUser
+  where !new = toNamedSV sv nm
+        -- note that we only add to the end of the seq to avoid reverse's later
+        goUser = onUserInps (Map.adjust (S.|> new) q)
+        goAll  = onAllInps  (Set.insert nm)
+
+-- addNamedUserInput :: Quantifier -> NamedSymVar -> Inputs -> Inputs
+-- addNamedUserInput q new = goAll . goUser
+--   where goUser = onUserInps (Map.adjust (S.|> new) q)
+--         goAll  = onAllInps  (Set.insert (getUserName new))
+
+getInputs :: Inputs -> (UserInps, InternInps)
+getInputs Inputs{..} = (userInps, internInps)
+
+inpsToLists :: Inputs -> ([(Quantifier, NamedSymVar)], [NamedSymVar])
+inpsToLists is =  (user, interns)
+  where
+    user'   :: [(Quantifier, [NamedSymVar])]
+    interns :: [NamedSymVar]
+    (user',interns) = ((Map.toList . fmap F.toList) *** Set.toList) $ getInputs is
+    user  = concatMap (\(q, xs) -> fmap (q,) xs) user'
+
 -- | The state of the symbolic interpreter
 data State  = State { pathCond     :: !SVal                             -- ^ kind KBool
                     , startTime    :: !UTCTime
@@ -954,7 +1030,8 @@ data State  = State { pathCond     :: !SVal                             -- ^ kin
                     , rctr         :: !(IORef Int)
                     , rUsedKinds   :: !(IORef KindSet)
                     , rUsedLbls    :: !(IORef (Set.Set String))
-                    , rinps        :: !(IORef (([(Quantifier, NamedSymVar)], [NamedSymVar]), Set.Set String)) -- First : User defined, with proper quantifiers
+                    -- , rinps        :: !(IORef (([(Quantifier, NamedSymVar)], [NamedSymVar]), Set.Set String)) -- First : User defined, with proper quantifiers
+                    , rinps        :: !(IORef Inputs) -- First : User defined, with proper quantifiers
                                                                                                            -- Second: Internally declared, always existential
                                                                                                            -- Third : Entire set of names, for faster lookup
                     , rConstraints :: !(IORef (S.Seq (Bool, [(String, String)], SV)))
@@ -978,42 +1055,8 @@ data State  = State { pathCond     :: !SVal                             -- ^ kin
                     } deriving (Generic)
 
 -- NFData is a bit of a lie, but it's sufficient, most of the content is iorefs that we don't want to touch
--- instance NFData State where
---    rnf State{} =
 instance NFData State where
-  rnf State {} =
-    rnf pathCond `deepseq`
-    rnf startTime `deepseq`
-    rnf runMode `deepseq`
-    rnf rIncState `deepseq`
-    rnf rCInfo `deepseq`
-    rnf rctr `deepseq`
-    rnf rinps `deepseq` rnf rObservables `deepseq` rnf rUsedLbls `deepseq` rnf rUsedKinds
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+   rnf State{} = ()
 
 -- | Get the current path condition
 getSValPathCondition :: State -> SVal
@@ -1110,7 +1153,7 @@ recordObservable st !nm !chk !sv = modifyState st rObservables ((nm, chk, sv):) 
 -- | Increment the variable counter
 incrementInternalCounter :: State -> IO Int
 incrementInternalCounter st = do !ctr <- readIORef (rctr st)
-                                 modifyState st rctr (+1) (return ())
+                                 modifyState st rctr (+1) $! return ()
                                  return ctr
 
 -- | Uninterpreted constants and functions. An uninterpreted constant is
@@ -1173,8 +1216,9 @@ internalVariable st k = do (NamedSymVar sv nm) <- newSV st k
                                      CodeGen              -> ALL
                                      Concrete{}           -> ALL
                                !n = "__internal_sbv_" <> nm
-                               !v = NamedSymVar sv n
-                           modifyState st rinps (first ((q, v) :) *** Set.insert (T.unpack n))
+                               !v = toNamedSV sv n
+                           -- modifyState st rinps (first ((q, v) :) *** Set.insert n)
+                           modifyState st rinps (addUserInput q sv n)
                                      $! modifyIncState st rNewInps (\(!newInps) -> case q of
                                                                                    EX -> v : newInps
                                                                                    -- I don't think the following can actually happen
@@ -1451,7 +1495,7 @@ svMkSymVarGen isTracker varContext k mbNm st = do
                            else do (NamedSymVar sv internalName) <- newSV st k
 
                                    let nm = fromMaybe (T.unpack internalName) mbNm
-                                       nsv = toNamedSV sv nm
+                                       nsv = toNamedSV' sv nm
 
                                        cv = case [(q, v) | ((q, nsv'), v) <- env, nsv == nsv'] of
                                               []              -> if isTracker
@@ -1476,9 +1520,9 @@ svMkSymVarGen isTracker varContext k mbNm st = do
 -- | Introduce a new user name. We simply append a suffix if we have seen this variable before.
 introduceUserName :: State -> (Bool, Bool) -> String -> Kind -> Quantifier -> SV -> IO SVal
 introduceUserName st@State{runMode} (isQueryVar, isTracker) nmOrig k q sv = do
-        (_, old) <- readIORef (rinps st)
+        old <- allInps <$> readIORef (rinps st)
 
-        let nm  = mkUnique nmOrig old
+        let nm  = mkUnique (T.pack nmOrig) old
 
         -- If this is not a query variable and we're in a query, reject it.
         -- See https://github.com/LeventErkok/sbv/issues/554 for the rationale.
@@ -1488,7 +1532,7 @@ introduceUserName st@State{runMode} (isQueryVar, isTracker) nmOrig k q sv = do
         -- and ask the user to obey the query mode rules.
         rm <- readIORef runMode
         case rm of
-          SMTMode _ IRun _ _ | not isQueryVar -> noInteractiveEver [ "Adding a new input variable in query mode: " ++ show nm
+          SMTMode _ IRun _ _ | not isQueryVar -> noInteractiveEver [ "Adding a new input variable in query mode: " <> show nm
                                                                    , ""
                                                                    , "Hint: Use freshVar/freshVar_ for introducing new inputs in query mode."
                                                                    ]
@@ -1506,16 +1550,19 @@ introduceUserName st@State{runMode} (isQueryVar, isTracker) nmOrig k q sv = do
                                                            , "Only existential variables are supported in query mode."
                                                            ]
                    if isTracker
-                      then modifyState st rinps (second ((toNamedSV sv nm) :) *** Set.insert nm)
+                      then modifyState st rinps (addInternInput sv nm)
                                      $ noInteractive ["Adding a new tracker variable in interactive mode: " ++ show nm]
-                      else modifyState st rinps (first ((q, (toNamedSV sv nm)) :) *** Set.insert nm)
+                      else modifyState st rinps (addUserInput q sv nm)
                                      $ modifyIncState st rNewInps newInp
                    return $ SVal k $ Right $ cache (const (return sv))
 
    where -- The following can be rather slow if we keep reusing the same prefix, but I doubt it'll be a problem in practice
          -- Also, the following will fail if we span the range of integers without finding a match, but your computer would
          -- die way ahead of that happening if that's the case!
-         mkUnique prefix names = head $ dropWhile (`Set.member` names) (prefix : [prefix ++ "_" ++ show i | i <- [(0::Int)..]])
+
+         -- this will be O(n (log n)) in the worst case where i == n here
+         mkUnique :: T.Text -> AllInps -> T.Text
+         mkUnique !prefix !names = head $ dropWhile (`Set.member` names) (prefix : [prefix <> "_" <> (T.pack $! show i) | i <- [(0::Int)..]])
 
 -- | Generalization of 'Data.SBV.runSymbolic'
 runSymbolic :: MonadIO m => SBVRunMode -> SymbolicT m a -> m (a, Result)
@@ -1529,7 +1576,7 @@ runSymbolic currentRunMode (SymbolicT c) = do
      pgm       <- newIORef (SBVPgm S.empty)
      emap      <- newIORef Map.empty
      cmap      <- newIORef Map.empty
-     inps      <- newIORef (([], []), Set.empty)
+     inps      <- newIORef mempty
      outs      <- newIORef []
      tables    <- newIORef Map.empty
      arrays    <- newIORef IMap.empty
@@ -1597,7 +1644,7 @@ extractSymbolicSimulationState st@State{ spgm=pgm, rinps=inps, routs=outs, rtblM
                                        , rObservables=observes
                                        } = do
    SBVPgm rpgm  <- readIORef pgm
-   inpsO <- (reverse *** reverse) . fst <$> readIORef inps
+   inpsO <- inpsToLists <$> readIORef inps
    outsO <- reverse <$> readIORef outs
 
    let swap  (a, b)              = (b, a)
