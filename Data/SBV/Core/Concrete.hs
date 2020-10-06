@@ -229,12 +229,10 @@ instance HasKind GeneralizedCV where
 
 -- | Are two CV's of the same type?
 cvSameType :: CV -> CV -> Bool
-{-# SCC cvSameType #-}
 cvSameType x y = kindOf x == kindOf y
 
 -- | Convert a CV to a Haskell boolean (NB. Assumes input is well-kinded)
 cvToBool :: CV -> Bool
-{-# SCC cvToBool #-}
 cvToBool x = cvVal x /= CInteger 0
 
 -- | Normalize a CV. Essentially performs modular arithmetic to make sure the
@@ -242,7 +240,6 @@ cvToBool x = cvVal x /= CInteger 0
 -- negative values, due to asymmetry. (i.e., an 8-bit negative number represents
 -- values in the range -128 to 127; thus we have to be careful on the negative side.)
 normCV :: CV -> CV
-{-# SCC normCV #-}
 normCV c@(CV (KBounded signed sz) (CInteger v)) = c { cvVal = CInteger norm }
  where norm | sz == 0 = 0
 
@@ -285,7 +282,6 @@ liftCV :: (AlgReal             -> b)
        -> (Either CVal CVal    -> b)
        -> CV
        -> b
-{-# SCC liftCV #-}
 liftCV f _ _ _ _ _ _ _ _ _ _ _ (CV _ (CAlgReal  v)) = f v
 liftCV _ f _ _ _ _ _ _ _ _ _ _ (CV _ (CInteger  v)) = f v
 liftCV _ _ f _ _ _ _ _ _ _ _ _ (CV _ (CFloat    v)) = f v
@@ -312,7 +308,6 @@ liftCV2 :: (AlgReal             -> AlgReal             -> b)
         -> (Either CVal CVal    -> Either CVal CVal    -> b)
         -> ((Maybe Int, String) -> (Maybe Int, String) -> b)
         -> CV                   -> CV                  -> b
-{-# SCC liftCV2 #-}
 liftCV2 r i f d c s u v m e w x y = case (cvVal x, cvVal y) of
                                       (CAlgReal   a, CAlgReal   b) -> r a b
                                       (CInteger   a, CInteger   b) -> i a b
@@ -337,7 +332,6 @@ mapCV :: (AlgReal             -> AlgReal)
       -> ((Maybe Int, String) -> (Maybe Int, String))
       -> CV
       -> CV
-{-# SCC mapCV #-}
 mapCV r i f d c s u x  = normCV $ CV (kindOf x) $ case cvVal x of
                                                     CAlgReal  a -> CAlgReal  (r a)
                                                     CInteger  a -> CInteger  (i a)
@@ -363,7 +357,6 @@ mapCV2 :: (AlgReal             -> AlgReal             -> AlgReal)
        -> CV
        -> CV
        -> CV
-{-# SCC mapCV2 #-}
 mapCV2 r i f d c s u x y = case (cvSameType x y, cvVal x, cvVal y) of
                             (True, CAlgReal  a, CAlgReal  b) -> normCV $! CV (kindOf x) (CAlgReal  (r a b))
                             (True, CInteger  a, CInteger  b) -> normCV $! CV (kindOf x) (CInteger  (i a b))
@@ -389,7 +382,6 @@ instance Show GeneralizedCV where
 
 -- | Show a CV, with kind info if bool is True
 showCV :: Bool -> CV -> String
-{-# SCC showCV #-}
 showCV shk w | isBoolean w = show (cvToBool w) ++ (if shk then " :: Bool" else "")
 showCV shk w               = liftCV show show show show show show snd shL shS shT shMaybe shEither w ++ kInfo
       where kw = kindOf w
@@ -459,7 +451,6 @@ mkConstCV k@KEither{}     a = error $ "Unexpected call to mkConstCV (" ++ show k
 
 -- | Generate a random constant value ('CVal') of the correct kind.
 randomCVal :: Kind -> IO CVal
-{-# SCC randomCVal #-}
 randomCVal k =
   case k of
     KBool              -> CInteger <$> randomRIO (0, 1)
@@ -495,7 +486,6 @@ randomCVal k =
 
 -- | Generate a random constant value ('CV') of the correct kind.
 randomCV :: Kind -> IO CV
-{-# SCC randomCV #-}
 randomCV k = CV k <$> randomCVal k
 
 {-# ANN module ("HLint: ignore Redundant if" :: String) #-}

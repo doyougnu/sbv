@@ -399,7 +399,6 @@ declMaybe = [ "(declare-datatypes ((SBVMaybe 1)) ((par (T)"
 -- for a list of what we include, in case something doesn't show up
 -- and you need it!
 cvtInc :: SMTLibIncConverter [String]
-{-# SCC cvtInc #-}
 cvtInc inps newKs consts arrs tbls uis (SBVPgm asgnsSeq) cstrs cfg =
             -- any new settings?
                settings

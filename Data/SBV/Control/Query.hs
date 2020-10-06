@@ -312,9 +312,9 @@ getModelAtIndex mbi = do
       m@CodeGen           -> error $ "SBV.getModel: Model is not available in mode: " ++ show m
       m@Concrete{}        -> error $ "SBV.getModel: Model is not available in mode: " ++ show m
       SMTMode _ _ isSAT _ -> do
-          !cfg   <- {-# SCC gm_getConfig #-} getConfig
-          !qinps <- {-# SCC gm_getQI #-} getQuantifiedInputs
-          !uis   <- {-# SCC gm_getUI #-} getUIs
+          !cfg   <- getConfig
+          !qinps <- getQuantifiedInputs
+          !uis   <- getUIs
 
            -- for "sat", display the prefix existentials. for "proof", display the prefix universals
           let
@@ -341,7 +341,7 @@ getModelAtIndex mbi = do
                                      !nm' = unpack nm
                                      in (sv', (nm', c))
 
-          !inputAssocs <- {-# SCC "gm_allModelInputs" #-} mapM (grab . snd) allModelInputs
+          !inputAssocs <- mapM (grab . snd) allModelInputs
 
           -- let assocs =  sortOn fst obsvs
           --            ++ sortByNodeId [p | p@(_, (nm, _)) <- inputAssocs, not (isNonModelVar cfg nm)]
