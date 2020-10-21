@@ -599,7 +599,7 @@ toNamedSV' :: SV -> String -> NamedSymVar
 toNamedSV' s = NamedSymVar s . T.pack
 
 toNamedSV :: SV -> T.Text -> NamedSymVar
-toNamedSV s = NamedSymVar s
+toNamedSV = NamedSymVar
 
 getSV :: NamedSymVar -> SV
 getSV (NamedSymVar s _) = s
@@ -1007,7 +1007,6 @@ addUserInput :: Quantifier -> SV -> UserName -> Inputs -> Inputs
 addUserInput q sv nm = goAll . goUser
   where !new = toNamedSV sv nm
         (NodeId nid) = swNodeId sv
-        -- note that we only add to the end of the seq to avoid reverse's later
         goUser = onUserInps (nid `IMap.insert` (q, new))
         goAll  = onAllInps  (Set.insert nm)
 
@@ -1666,7 +1665,7 @@ extractSymbolicSimulationState st@State{ spgm=pgm, rinps=inps, routs=outs, rtblM
                                        , rObservables=observes
                                        } = do
    SBVPgm rpgm  <- readIORef pgm
-   -- TODO the reversal that breaks the ordering constraint could be right here!
+   -- TODO [REVERSAL] the reversal that breaks the ordering constraint could be right here!
    -- inpsO <- (reverse *** reverse) . fst <$> readIORef inps
    inpsO <- inpsToLists <$> readIORef inps
    outsO <- reverse <$> readIORef outs

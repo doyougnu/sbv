@@ -322,7 +322,7 @@ class ExtractIO m => MProvable m a where
                                                , "*** Data.SBV: Problem needs optimization of metric in the scope of universally quantified variable(s):"
                                                , "***"
                                                ]
-                                           ++  [ "***          " ++  pad s ++ " [Depends on: " ++ intercalate ", " xs ++ "]"  | (s, xs) <- needsUniversalOpt ]
+                                           ++  [ "***          " ++  pad s ++ " [Depends on: " ++ intercalate ", " (getUserName' <$> xs) ++ "]"  | (s, xs) <- needsUniversalOpt ]
                                            ++  [ "***"
                                                , "*** Optimization is only meaningful with existentially quantified metrics."
                                                ]

@@ -335,8 +335,11 @@ getModelAtIndex mbi = do
           -- let sortByNodeId :: [(SV, (String, CV))] -> [(String, CV)]
           --     sortByNodeId = map snd . sortBy (compare `on` (\(SV _ nid, _) -> nid))
 
-          let grab (NamedSymVar sv nm) = wrap <$> getValueCV mbi sv
-                 where wrap c = (sv, ((unpack nm), c))
+          let
+            grab (NamedSymVar sv nm) = wrap <$> theCV
+                 where
+                   !theCV = getValueCV mbi sv
+                   wrap !c = (sv, (unpack nm, c))
 
           !inputAssocs <- {-# SCC "gm_allModelInputs" #-} mapM (grab . snd) allModelInputs
 

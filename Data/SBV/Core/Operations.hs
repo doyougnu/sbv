@@ -371,6 +371,7 @@ svGreaterEq x y
 
 -- | Bitwise and.
 svAnd :: SVal -> SVal -> SVal
+{-# INLINE svAnd #-}
 svAnd !x !y
   | isConcreteZero x = x
   | isConcreteOnes x = y
@@ -385,6 +386,7 @@ svAnd !x !y
 
 -- | Bitwise or.
 svOr :: SVal -> SVal -> SVal
+{-# INLINE svOr #-}
 svOr x y
   | isConcreteZero x = y
   | isConcreteOnes x = x

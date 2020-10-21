@@ -51,12 +51,12 @@ import Data.Proxy
 import qualified Data.Map.Strict    as Map
 import qualified Data.IntMap.Strict as IMap
 import qualified Data.Sequence      as S
+import qualified Data.Foldable as F (toList)
 
 import Control.Monad            (join, unless, zipWithM, when, replicateM)
 import Control.Monad.IO.Class   (MonadIO, liftIO)
 import Control.Monad.Trans      (lift)
 import Control.Monad.Reader     (runReaderT)
-import Control.DeepSeq          (force)
 
 import Data.Maybe (isNothing, isJust)
 
@@ -81,7 +81,8 @@ import Data.SBV.Core.Symbolic ( IncState(..), withNewIncState, State(..), svToSV
                               , registerLabel, svMkSymVar, validationRequested
                               , isSafetyCheckingIStage, isSetupIStage, isRunIStage, IStage(..), QueryT(..)
                               , extractSymbolicSimulationState, MonadSymbolic(..), newUninterpreted
-                              , NamedSymVar(..),getSV,getUserName'
+                              , NamedSymVar(..),getSV,getUserName', getInputs, getExistentials, getForAlls
+                              , userInps, userInpsToList
                               )
 
 import Data.SBV.Core.AlgReals   (mergeAlgReals, AlgReal(..), RealPoint(..))
@@ -971,7 +972,7 @@ recoverKindedValue k e = case k of
 -- | Generalization of 'Data.SBV.Control.getValueCV'
 getValueCV :: (MonadIO m, MonadQuery m) => Maybe Int -> SV -> m CV
 {-# SCC getValueCV #-}
-getValueCV mbi s
+getValueCV !mbi !s
   | kindOf s /= KReal
   = getValueCVHelper mbi s
   | True
@@ -979,10 +980,10 @@ getValueCV mbi s
        if not (supportsApproxReals (capabilities (solver cfg)))
           then getValueCVHelper mbi s
           else do send True "(set-option :pp.decimal false)"
-                  rep1 <- getValueCVHelper mbi s
+                  !rep1 <- getValueCVHelper mbi s
                   send True   "(set-option :pp.decimal true)"
                   send True $ "(set-option :pp.decimal_precision " ++ show (printRealPrec cfg) ++ ")"
-                  rep2 <- getValueCVHelper mbi s
+                  !rep2 <- getValueCVHelper mbi s
 
                   let bad = unexpected "getValueCV" "get-value" ("a real-valued binding for " ++ show s) Nothing (show (rep1, rep2)) Nothing
 
@@ -1066,14 +1067,15 @@ checkSatUsing cmd = do let bad = unexpected "checkSat" cmd "one of sat/unsat/unk
 -- | What are the top level inputs? Trackers are returned as top level existentials
 getQuantifiedInputs :: (MonadIO m, MonadQuery m) => m [(Quantifier, NamedSymVar)]
 {-# SCC getQuantifiedInputs #-}
-getQuantifiedInputs = do State{rinps} <- force <$> queryState
-                         ((!rQinps, !rTrackers), _) <- liftIO $! readIORef rinps
+getQuantifiedInputs = do State{rinps} <- queryState
+                         (rQinps, rTrackers) <- liftIO $ getInputs <$> readIORef rinps
 
-                         let !qinps    = reverse rQinps
-                             !trackers = map (EX,) $ reverse rTrackers
-
-                             -- separate the existential prefix, which will go first
-                             (!preQs, !postQs) = span (\(!q, _) -> force (q == EX)) qinps
+                             -- TODO [REVERSAL]: we reverse trackers here and rQinps here
+                         -- let !qinps    = reverse rQinps
+                             -- !trackers = map (EX,) $ reverse rTrackers
+                         let trackers = (EX,) <$> F.toList rTrackers
+                             preQs    = F.toList   $ getExistentials rQinps
+                             postQs   = F.toList   $ getForAlls rQinps
 
                          return $! preQs <> trackers <> postQs
 
@@ -1465,8 +1467,8 @@ runProofOn rm context comments res@(Result ki _qcInfo _observables _codeSegs is 
          skolemize :: [(Quantifier, NamedSymVar)] -> [Either SV (SV, [SV])]
          skolemize quants = go quants ([], [])
            where go []                   (_,  !sofar) = reverse sofar
-                 go ((ALL, (getSV -> v)):rest) (!us, !sofar) = go rest (v:us, Left v : sofar)
-                 go ((EX,  (getSV -> v)):rest) (!us, !sofar) = go rest (us,   Right (v, reverse us) : sofar)
+                 go ((ALL, getSV -> v):rest) (!us, !sofar) = go rest (v:us, Left v : sofar)
+                 go ((EX,  getSV -> v):rest) (!us, !sofar) = go rest (us,   Right (v, reverse us) : sofar)
 
          qinps      = if isSat then fst is else map flipQ (fst is)
          skolemMap  = skolemize qinps
@@ -1535,8 +1537,8 @@ executeQuery queryContext (QueryT userQuery) = do
                     case queryContext of
                       QueryInternal -> return ()         -- we're good, internal usages don't mess with scopes
                       QueryExternal -> do
-                        ((userInps, _), _) <- readIORef (rinps st)
-                        let badInps = {-# SCC "exQ_badInps" #-}reverse [n | (ALL, nm) <- userInps, let n = getUserName' nm]
+                        userInps <- userInpsToList . userInps <$> readIORef (rinps st)
+                        let badInps = reverse [n | (ALL, nm) <- userInps, let n = getUserName' nm]
                         case badInps of
                           [] -> return ()
                           _  -> let plu | length badInps > 1 = "s require"
