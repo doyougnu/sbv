@@ -15,6 +15,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE BangPatterns        #-}
 {-# LANGUAGE ViewPatterns        #-}
+{-# LANGUAGE TupleSections #-}
 
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans #-}
 
@@ -317,16 +318,16 @@ getModelAtIndex mbi = do
 
            -- for "sat", display the prefix existentials. for "proof", display the prefix universals
           let
-            wasSat,wasNotSat :: [(Quantifier, NamedSymVar)]
+            wasSat,wasNotSat,allModelInputs :: M.Map Quantifier [NamedSymVar]
             -- !wasSat = takeWhile ((/= ALL) . fst) qinps
             -- !wasNotSat = dropWhile ((/= ALL) . fst) qinps -- takeWhile ((== ALL) . fst) qinps
-            (!wasSat, !wasNotSat) = span ((/= ALL) . fst) qinps
+            (!wasSat, !wasNotSat) = M.partitionWithKey (\k _ -> k /= ALL) qinps
             !allModelInputs = if isSAT
                                 then wasSat
                                 else wasNotSat
 
               -- Add on observables only if we're not in a quantified context
-            grabObservables = length allModelInputs == length qinps -- i.e., we didn't drop anything
+            grabObservables = M.size allModelInputs == M.size qinps -- i.e., we didn't drop anything
 
           obsvs <- if grabObservables
                    then getObservables
@@ -336,17 +337,28 @@ getModelAtIndex mbi = do
           --     sortByNodeId = map snd . sortBy (compare `on` (\(SV _ nid, _) -> nid))
 
           let
+            grab :: (MonadIO m, MonadQuery m) => NamedSymVar -> m (M.Map SV (String, CV))
             grab (NamedSymVar sv nm) = wrap <$> theCV
                  where
-                   !theCV = getValueCV mbi sv
-                   wrap !c = (sv, (unpack nm, c))
 
-          !inputAssocs <- {-# SCC "gm_allModelInputs" #-} mapM (grab . snd) allModelInputs
+                   theCV :: (MonadIO m, MonadQuery m) => m CV
+                   !theCV = getValueCV mbi sv
+
+                   wrap :: CV -> M.Map SV (String, CV)
+                   wrap !c = M.singleton sv (name, c)
+                     where !name = unpack nm
+
+            invert :: [(Quantifier, [NamedSymVar])] -> [(Quantifier, NamedSymVar)]
+            invert = concatMap go
+              where go (q, xs) = fmap (q,) xs
+
+          -- !inputAssocs <- {-# SCC "gm_allModelInputs" #-} mapM (grab . snd) allModelInputs
+          !inputAssocs <- mconcat . mconcat . M.elems <$> mapM (mapM grab) allModelInputs
 
           -- let assocs =  sortOn fst obsvs
           --            ++ sortByNodeId [p | p@(_, (nm, _)) <- inputAssocs, not (isNonModelVar cfg nm)]
           -- let !assocs = M.fromList $ obsvs <> (filter (\(nm,_) -> not (isNonModelVar cfg nm)) . fmap snd $! inputAssocs)
-          let !assocs = M.fromList $! obsvs <> fmap snd inputAssocs
+          let !assocs = M.fromList $! obsvs <> M.elems inputAssocs
 
 
           -- collect UIs if requested
@@ -361,7 +373,7 @@ getModelAtIndex mbi = do
                   Just cmds -> mapM_ (send True) cmds
 
           bindings <- let get i@(ALL, _)      = return (i, Nothing)
-                          get i@(EX, getSV -> sv) = case sv `lookup` inputAssocs of
+                          get i@(EX, getSV -> sv) = case sv `M.lookup` inputAssocs of
                                                   Just (_, cv) -> return (i, Just cv)
                                                   Nothing      -> do cv <- getValueCV mbi sv
                                                                      return (i, Just cv)
@@ -372,7 +384,7 @@ getModelAtIndex mbi = do
                                              (False, ALL) -> (EX,  sv)
 
                       in if validationRequested cfg
-                         then Just <$> mapM (get . flipQ) qinps
+                         then Just <$> mapM (get . flipQ) (invert $ M.toList qinps)
                          else return Nothing
 
           uivs <- mapM (\ui@(nm, t) -> (\a -> (nm, (t, a))) <$> getUIFunCVAssoc mbi ui) uiFuns
@@ -392,7 +404,7 @@ getObjectiveValues = do let cmd = "(get-objectives)"
 
                         r <- ask cmd
 
-                        inputs <- map snd <$> getQuantifiedInputs
+                        inputs <- mconcat . M.elems <$> getQuantifiedInputs
 
                         parse r bad $ \case EApp (ECon "objectives" : es) -> catMaybes <$> mapM (getObjValue (bad r) inputs) es
                                             _                             -> bad r Nothing
@@ -784,10 +796,13 @@ mkSMTResult asgns = do
                                     --     - No duplicates
                                     --     - No bindings to vars that are not inputs
                                     let userSS = map fst modelAssignment
+                                        invert :: [(Quantifier, [NamedSymVar])] -> [(Quantifier, NamedSymVar)]
+                                        invert = concatMap go
+                                          where go (q, xs) = fmap (q,) xs
 
                                         missing, extra, dup :: [String]
-                                        missing = [getUserName' nm | (EX, nm) <- inps, getSV nm `notElem` userSS]
-                                        extra   = [show s | s <- userSS, s `notElem` map (getSV . snd) inps]
+                                        missing = [getUserName' nm | nm <- ((M.!) inps EX), getSV nm `notElem` userSS]
+                                        extra   = [show s | s <- userSS, s `notElem` map (getSV . snd) (invert $ M.toList inps)]
                                         dup     = let walk []     = []
                                                       walk (n:ns)
                                                         | n `elem` ns = show n : walk (filter (/= n) ns)
@@ -818,7 +833,7 @@ mkSMTResult asgns = do
                                                             , "*** Data.SBV: Check your query result construction!"
                                                             ]
 
-                                    let findName s = case [unpack nm | (_, NamedSymVar i nm) <- inps, s == i] of
+                                    let findName s = case [unpack nm | (NamedSymVar i nm) <- mconcat $ M.elems inps, s == i] of
                                                         [nm] -> nm
                                                         []   -> error "*** Data.SBV: Impossible happened: Cannot find " ++ show s ++ " in the input list"
                                                         nms  -> error $ unlines [ ""

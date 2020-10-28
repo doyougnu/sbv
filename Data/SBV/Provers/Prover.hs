@@ -279,8 +279,9 @@ class ExtractIO m => MProvable m a where
                                           ]
 
 
-                   let !universals = [s | (ALL, s) <- qinps]
-                       universals :: [NamedSymVar]
+                   let universals :: [NamedSymVar]
+                       -- !universals = [s | (ALL, s) <- M.! qinps ALL]
+                       !universals = M.findWithDefault mempty ALL qinps
 
                        firstUniversal
                          | null universals = error "Data.SBV: Impossible happened! Universal optimization with no universals!"

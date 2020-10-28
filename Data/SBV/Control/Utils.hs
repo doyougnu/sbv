@@ -1065,19 +1065,19 @@ checkSatUsing cmd = do let bad = unexpected "checkSat" cmd "one of sat/unsat/unk
                                            _                -> bad r Nothing
 
 -- | What are the top level inputs? Trackers are returned as top level existentials
-getQuantifiedInputs :: (MonadIO m, MonadQuery m) => m [(Quantifier, NamedSymVar)]
+getQuantifiedInputs :: (MonadIO m, MonadQuery m) => m (Map.Map Quantifier [NamedSymVar])
 {-# SCC getQuantifiedInputs #-}
 getQuantifiedInputs = do State{rinps} <- queryState
                          (rQinps, rTrackers) <- liftIO $ getInputs <$> readIORef rinps
 
-                             -- TODO [REVERSAL]: we reverse trackers here and rQinps here
-                         -- let !qinps    = reverse rQinps
-                             -- !trackers = map (EX,) $ reverse rTrackers
-                         let trackers = (EX,) <$> F.toList rTrackers
-                             preQs    = F.toList   $ getExistentials rQinps
-                             postQs   = F.toList   $ getForAlls rQinps
+                         -- TODO [REVERSAL]: we reverse trackers here and rQinps here
 
-                         return $! preQs <> trackers <> postQs
+                         let trackers,preQs,postQs :: [(Quantifier,[NamedSymVar])]
+                             trackers = (EX,) . pure <$> F.toList rTrackers
+                             preQs    = (\(x,y) -> (x,pure y)) <$> getExistentials rQinps
+                             postQs   = (\(x,y) -> (x,pure y)) <$> getForAlls rQinps
+
+                         return $! Map.fromListWith (++) $ preQs <> trackers <> postQs
 
 -- | Get observables, i.e., those explicitly labeled by the user with a call to 'Data.SBV.observe'.
 getObservables :: (MonadIO m, MonadQuery m) => m [(String, CV)]
@@ -1154,7 +1154,13 @@ getAllSatResult = do queryDebug ["*** Checking Satisfiability, all solutions.."]
                                                        , "***             SBV will use equivalence classes to generate all-satisfying instances."
                                                        ]
 
-                     let allModelInputs  = takeWhile ((/= ALL) . fst) qinps
+                       -- TODO [REVERSAL]: convert this to use map operations
+                     let allModelInputs :: [(Quantifier, NamedSymVar)]
+                         allModelInputs  = invert $ takeWhile ((/= ALL) . fst) (Map.toList qinps)
+
+                         invert :: [(Quantifier, [NamedSymVar])] -> [(Quantifier, NamedSymVar)]
+                         invert = concatMap go
+                           where go (q, xs) = fmap (q,) xs
                          -- Add on observables only if we're not in a quantified context:
                          grabObservables = length allModelInputs == length qinps -- i.e., we didn't drop anything
 
@@ -1170,9 +1176,9 @@ getAllSatResult = do queryDebug ["*** Checking Satisfiability, all solutions.."]
                                 in map mkSVal $ sortByNodeId [nv | (_, nv) <- allModelInputs, not (ignored (getUserName' nv))]
 
                          -- If we have any universals, then the solutions are unique upto prefix existentials.
-                         w = ALL `elem` map fst qinps
+                         w = ALL `elem` map fst (Map.toList qinps)
 
-                     res <- loop grabObservables topState (allUiFuns, uiFuns) qinps vars cfg AllSatResult { allSatMaxModelCountReached  = False
+                     res <- loop grabObservables topState (allUiFuns, uiFuns) (invert $ Map.toList qinps) vars cfg AllSatResult { allSatMaxModelCountReached  = False
                                                                                                           , allSatHasPrefixExistentials = w
                                                                                                           , allSatSolverReturnedUnknown = False
                                                                                                           , allSatSolverReturnedDSat    = False
