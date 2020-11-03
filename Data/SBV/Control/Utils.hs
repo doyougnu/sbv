@@ -1191,12 +1191,12 @@ getAllSatResult = do queryDebug ["*** Checking Satisfiability, all solutions.."]
                          -- If we have any universals, then the solutions are unique upto prefix existentials.
                          w = ALL `elem` map fst (Map.toList qinps)
 
-                     res <- loop grabObservables topState (allUiFuns, uiFuns) (invert $ Map.toList qinps) vars cfg AllSatResult { allSatMaxModelCountReached  = False
-                                                                                                          , allSatHasPrefixExistentials = w
-                                                                                                          , allSatSolverReturnedUnknown = False
-                                                                                                          , allSatSolverReturnedDSat    = False
-                                                                                                          , allSatResults               = []
-                                                                                                          }
+                     res <- loop grabObservables topState (allUiFuns, uiFuns) allUiRegs (invert $ Map.toList qinps) vars cfg AllSatResult { allSatMaxModelCountReached  = False
+                                                                                                                                          , allSatHasPrefixExistentials = w
+                                                                                                                                          , allSatSolverReturnedUnknown = False
+                                                                                                                                          , allSatSolverReturnedDSat    = False
+                                                                                                                                          , allSatResults               = []
+                                                                                                                                          }
                      -- results come out in reverse order, so reverse them:
                      pure $ res { allSatResults = reverse (allSatResults res) }
 

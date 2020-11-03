@@ -352,13 +352,10 @@ getModelAtIndex mbi = do
             invert = concatMap go
               where go (q, xs) = fmap (q,) xs
 
-          -- !inputAssocs <- {-# SCC "gm_allModelInputs" #-} mapM (grab . snd) allModelInputs
           !inputAssocs <- mconcat . mconcat . M.elems <$> mapM (mapM grab) allModelInputs
 
-          -- let assocs =  sortOn fst obsvs
-          --            ++ sortByNodeId [p | p@(_, (nm, _)) <- inputAssocs, not (isNonModelVar cfg nm)]
-          -- let !assocs = M.fromList $ obsvs <> (filter (\(nm,_) -> not (isNonModelVar cfg nm)) . fmap snd $! inputAssocs)
-          let !assocs = M.fromList $! obsvs <> M.elems inputAssocs
+          let --TODO this is a map merge through a list, just do the map merge
+              !assocs    = M.fromList $! obsvs <> M.elems inputAssocs
 
 
           -- collect UIs, and UI functions if requested
@@ -394,7 +391,7 @@ getModelAtIndex mbi = do
 
           return SMTModel { modelObjectives = []
                           , modelBindings   = bindings
-                          , modelAssocs     = uiVals ++ assocs
+                          , modelAssocs     = (M.fromList uiVals) <> assocs
                           , modelUIFuns     = uiFunVals
                           }
 
