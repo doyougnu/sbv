@@ -25,7 +25,7 @@
 module Data.SBV.Control.Utils (
        io
      , ask, send, getValue, getFunction, getUninterpretedValue
-     , getValueCV, getUIFunCVAssoc, getUnsatAssumptions
+     , getValueCV, getUICVal, getUIFunCVAssoc, getUnsatAssumptions
      , SMTFunction(..), registerUISMTFunction
      , getQueryState, modifyQueryState, getConfig, getObjectives, getUIs
      , getSBVAssertions, getSBVPgm, getQuantifiedInputs, getObservables
@@ -730,25 +730,7 @@ getValueCVHelper mbi s
   | s == falseSV
   = return falseCV
   | True
-  = do let nm  = show s
-           k   = kindOf s
-
-           modelIndex = case mbi of
-                          Nothing -> ""
-                          Just i  -> " :model_index " ++ show i
-
-           cmd        = "(get-value (" ++ nm ++ ")" ++ modelIndex ++ ")"
-
-           bad = unexpected "getModel" cmd ("a value binding for kind: " ++ show k) Nothing
-
-       r <- ask cmd
-
-       let recover val = case recoverKindedValue (kindOf s) val of
-                           Just cv -> return cv
-                           Nothing -> bad r Nothing
-
-       parse r bad $ \case EApp [EApp [ECon v, val]] | v == nm -> recover val
-                           _                                   -> bad r Nothing
+  = extractValue mbi (show s) (kindOf s)
 
 -- | "Make up" a CV for this type. Like zero, but smarter.
 defaultKindedValue :: Kind -> Maybe CV
@@ -991,6 +973,32 @@ getValueCV !mbi !s
                     (CV KReal (CAlgReal a), CV KReal (CAlgReal b)) -> return $ CV KReal (CAlgReal (mergeAlgReals ("Cannot merge real-values for " ++ show s) a b))
                     _                                              -> bad
 
+-- | Retrieve value from the solver
+extractValue :: forall m. (MonadIO m, MonadQuery m) => Maybe Int -> String -> Kind -> m CV
+extractValue mbi nm k = do
+       let modelIndex = case mbi of
+                          Nothing -> ""
+                          Just i  -> " :model_index " ++ show i
+
+           cmd        = "(get-value (" ++ nm ++ ")" ++ modelIndex ++ ")"
+
+           bad = unexpected "getModel" cmd ("a value binding for kind: " ++ show k) Nothing
+
+       r <- ask cmd
+
+       let recover val = case recoverKindedValue k val of
+                           Just cv -> return cv
+                           Nothing -> bad r Nothing
+
+       parse r bad $ \case EApp [EApp [ECon v, val]] | v == nm -> recover val
+                           _                                   -> bad r Nothing
+
+-- | Generalization of 'Data.SBV.Control.getUICVal'
+getUICVal :: forall m. (MonadIO m, MonadQuery m) => Maybe Int -> (String, SBVType) -> m CV
+getUICVal mbi (nm, t) = case t of
+                          SBVType [k] -> extractValue mbi nm k
+                          _           -> error $ "SBV.getUICVal: Expected to be called on an uninterpeted value of a base type, received something else: " ++ show (nm, t)
+
 -- | Generalization of 'Data.SBV.Control.getUIFunCVAssoc'
 getUIFunCVAssoc :: forall m. (MonadIO m, MonadQuery m) => Maybe Int -> (String, SBVType) -> m ([([CV], CV)], CV)
 {-# SCC getUIFunCVAssoc #-}
@@ -1125,20 +1133,25 @@ getAllSatResult = do queryDebug ["*** Checking Satisfiability, all solutions.."]
                                         , not (isNonModelVar cfg nm)                              -- make sure they aren't explicitly ignored
                                      ]
 
+                         allUiRegs = [u | u@(nm, SBVType as) <- allUninterpreteds, length as == 1  -- non-function ones
+                                        , not (isNonModelVar cfg nm)                               -- make sure not ignored
+                                     ]
+
                          -- We can only "allSat" if all component types themselves are interpreted. (Otherwise
                          -- there is no way to reflect back the values to the solver.)
-                         collectAcceptable []                              sofar = return sofar
+                         collectAcceptable []                           sofar = return sofar
                          collectAcceptable ((nm, t@(SBVType ats)):rest) sofar
                            | not (any hasUninterpretedSorts ats)
                            = collectAcceptable rest (nm : sofar)
                            | True
                            = do queryDebug [ "*** SBV.allSat: Uninterpreted function: " ++ nm ++ " :: " ++ show t
-                                           , "*** Will *not* be used in allSat consideretions since its type"
+                                           , "*** Will *not* be used in allSat considerations since its type"
                                            , "*** has uninterpreted sorts present."
                                            ]
                                 collectAcceptable rest sofar
 
                      uiFuns <- reverse <$> collectAcceptable allUiFuns []
+                     _      <- collectAcceptable allUiRegs [] -- only done to get the queryDebug output. Actual result not needed/used
 
                      -- If there are uninterpreted functions, arrange so that z3's pretty-printer flattens things out
                      -- as cex's tend to get larger
@@ -1190,7 +1203,7 @@ getAllSatResult = do queryDebug ["*** Checking Satisfiability, all solutions.."]
    where isFree (KUserSort _ Nothing) = True
          isFree _                     = False
 
-         loop grabObservables topState (allUiFuns, uiFunsToReject) qinps vars cfg = go (1::Int)
+         loop grabObservables topState (allUiFuns, uiFunsToReject) allUiRegs qinps vars cfg = go (1::Int)
            where go :: Int -> AllSatResult -> m AllSatResult
                  go !cnt sofar
                    | Just maxModels <- allSatMaxModelCount cfg, cnt > maxModels
@@ -1234,6 +1247,8 @@ getAllSatResult = do queryDebug ["*** Checking Satisfiability, all solutions.."]
                                                                     return (nm, (t, cvs))
                                        uiFunVals <- mapM getUIFun allUiFuns
 
+                                       uiRegVals <- mapM (\ui@(nm, _) -> (nm,) <$> getUICVal Nothing ui) allUiRegs
+
                                        -- Add on observables if we're asked to do so:
                                        obsvs <- if grabObservables
                                                    then getObservables
@@ -1258,11 +1273,18 @@ getAllSatResult = do queryDebug ["*** Checking Satisfiability, all solutions.."]
 
                                            (interpreteds, uninterpreteds) = partition (not . isFree . kindOf . fst) (map (snd . snd) assocs)
 
+                                           interpretedRegUis = filter (not . isFree . kindOf . snd) uiRegVals
+
+                                           interpretedRegUiSVs = [(cvt n (kindOf cv), cv) | (n, cv) <- interpretedRegUis]
+                                             where cvt :: String -> Kind -> SVal
+                                                   cvt nm k = SVal k $ Right $ cache r
+                                                     where r st = newExpr st k (SBVApp (Uninterpreted nm) [])
+
                                            -- For each interpreted variable, figure out the model equivalence
                                            -- NB. When the kind is floating, we *have* to be careful, since +/- zero, and NaN's
                                            -- and equality don't get along!
                                            interpretedEqs :: [SVal]
-                                           interpretedEqs = [mkNotEq (kindOf sv) sv (SVal (kindOf sv) (Left cv)) | (sv, cv) <- interpreteds]
+                                           interpretedEqs = [mkNotEq (kindOf sv) sv (SVal (kindOf sv) (Left cv)) | (sv, cv) <- interpretedRegUiSVs ++ interpreteds]
                                               where mkNotEq k a b
                                                      | isDouble k || isFloat k = svNot (a `fpNotEq` b)
                                                      | True                    = a `svNotEqual` b
@@ -1287,7 +1309,7 @@ getAllSatResult = do queryDebug ["*** Checking Satisfiability, all solutions.."]
                                            -- We do this rather brute-force, since we need to create a new function
                                            -- and do an existential assertion.
                                            uninterpretedReject :: Maybe [String]
-                                           uninterpretedFuns    :: [String]
+                                           uninterpretedFuns   :: [String]
                                            (uninterpretedReject, uninterpretedFuns) = (uiReject, concat defs)
                                                where uiReject = case rejects of
                                                                   []  -> Nothing

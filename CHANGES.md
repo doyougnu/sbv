@@ -1,9 +1,13 @@
 * Hackage: <http://hackage.haskell.org/package/sbv>
 * GitHub:  <http://leventerkok.github.com/sbv/>
 
-* Latest Hackage released version: 8.8, 2020-09-04
+* Latest Hackage released version: 8.9, 2020-10-28
 
-### Version 8.8.5, Not yet released
+### Version 8.9.5, Not released yet.
+
+  * Current dev version
+
+### Version 8.9, 2020-10-28
 
   * Rename 'sbvAvailableSolvers' to 'getAvailableSolvers'.
 
@@ -13,6 +17,19 @@
     doesn't support the coversion at all, since former doesn't support integers
     and the latter doesn't support bit-vectors.) Thanks to Martin Lundfall
     for the initial pull request.
+
+  * Add `sym` as a synonym for `uninterpret`. This allows us to write expressions
+    of the form `sat $ sym "a" - sym "b" .== (0::SInteger)`, without resorting to lambda
+    expressions or having to explicitly be in the Symbolic monad.
+
+  * Added missing instances for overflow-checking arithmetic of arbitrary
+    sized signed and unsigned bitvectors.
+
+  * In a sat (or allSat) call, also return the values of the uninterpreted values, along with
+    all the explicitly named inputs. Strictly speaking, this is backwards-incompatible,
+    but it the new behavior is consistent with how we handle uninterpreted values in general.
+
+  * Improve SMTLib logic-detection code to use generics.
 
 ### Version 8.8, 2020-09-04
 

@@ -25,11 +25,19 @@
 [SEND] (check-sat)
 [RECV] sat
 [SEND] (get-value (s0))
+<<<<<<< HEAD
 [RECV] ((s0 (fp #b0 #xfe #b11111111111111111111111)))
 *** Solver   : Z3
 *** Exit code: ExitSuccess
 [VALIDATE] Validating the model. Assignment:
 [VALIDATE]       x = 3.4028235e38 :: Float
+=======
+[RECV] ((s0 (_ +zero 8 24)))
+*** Solver   : Z3
+*** Exit code: ExitSuccess
+[VALIDATE] Validating the model. Assignment:
+[VALIDATE]       x = 0.0 :: Float
+>>>>>>> master
 [VALIDATE] There are no constraints to check.
 [VALIDATE] Validating outputs.
 
@@ -38,7 +46,11 @@ FINAL OUTPUT:
 *** 
 *** Assignment:
 *** 
+<<<<<<< HEAD
 ***       x = 3.4028235e38 :: Float
+=======
+***       x = 0.0 :: Float
+>>>>>>> master
 *** 
 *** Not all floating point operations are supported concretely.
 *** 
@@ -47,4 +59,9 @@ FINAL OUTPUT:
 ***
 *** Alleged model:
 ***
+<<<<<<< HEAD
 *** Satisfiable
+=======
+*** Satisfiable. Model:
+***   x = 0.0 :: Float
+>>>>>>> master

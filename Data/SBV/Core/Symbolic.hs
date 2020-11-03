@@ -113,10 +113,11 @@ import Control.Monad.Fail as Fail
 #endif
 
 -- | A symbolic node id
-newtype NodeId = NodeId Int deriving (Eq, Ord)
+newtype NodeId = NodeId Int deriving (Eq, Ord, G.Data)
 
 -- | A symbolic word, tracking it's signedness and size.
 data SV = SV !Kind !NodeId
+        deriving G.Data
 
 -- | For equality, we merely use the node-id
 instance Eq SV where
@@ -203,7 +204,7 @@ data Op = Plus
         | MaybeConstructor Kind Bool            -- Construct a maybe value; False: Nothing, True: Just
         | MaybeIs Kind Bool                     -- Maybe tester; False: nothing, True: just
         | MaybeAccess                           -- Maybe branch access; grab the contents of the just
-        deriving (Eq, Ord)
+        deriving (Eq, Ord, G.Data)
 
 -- | Floating point operations
 data FPOp = FP_Cast        Kind Kind SV   -- From-Kind, To-Kind, RoundingMode. This is "value" conversion
@@ -228,7 +229,7 @@ data FPOp = FP_Cast        Kind Kind SV   -- From-Kind, To-Kind, RoundingMode. T
           | FP_IsNaN
           | FP_IsNegative
           | FP_IsPositive
-          deriving (Eq, Ord)
+          deriving (Eq, Ord, G.Data)
 
 -- Note that the show instance maps to the SMTLib names. We need to make sure
 -- this mapping stays correct through SMTLib changes. The only exception
@@ -274,7 +275,7 @@ data NROp = NR_Sin
           | NR_Exp
           | NR_Log
           | NR_Pow
-          deriving (Eq, Ord)
+          deriving (Eq, Ord, G.Data)
 
 -- | The show instance carefully arranges for these to be printed as it can be understood by dreal
 instance Show NROp where
@@ -299,13 +300,13 @@ data PBOp = PB_AtMost  Int        -- ^ At most k
           | PB_Le      [Int] Int  -- ^ At most k,  with coefficients given. Generalizes PB_AtMost
           | PB_Ge      [Int] Int  -- ^ At least k, with coefficients given. Generalizes PB_AtLeast
           | PB_Eq      [Int] Int  -- ^ Exactly k,  with coefficients given. Generalized PB_Exactly
-          deriving (Eq, Ord, Show)
+          deriving (Eq, Ord, Show, G.Data)
 
 -- | Overflow operations
 data OvOp = Overflow_SMul_OVFL   -- ^ Signed multiplication overflow
           | Overflow_SMul_UDFL   -- ^ Signed multiplication underflow
           | Overflow_UMul_OVFL   -- ^ Unsigned multiplication overflow
-          deriving (Eq, Ord)
+          deriving (Eq, Ord, G.Data)
 
 -- | Show instance. It's important that these follow the internal z3 names
 instance Show OvOp where
@@ -327,7 +328,7 @@ data StrOp = StrConcat       -- ^ Concatenation of one or more strings
            | StrStrToNat     -- ^ Retrieve integer encoded by string @s@ (ground rewriting only)
            | StrNatToStr     -- ^ Retrieve string encoded by integer @i@ (ground rewriting only)
            | StrInRe RegExp  -- ^ Check if string is in the regular expression
-           deriving (Eq, Ord)
+           deriving (Eq, Ord, G.Data)
 
 -- | Regular expressions. Note that regular expressions themselves are
 -- concrete, but the 'Data.SBV.RegExp.match' function from the 'Data.SBV.RegExp.RegExpMatchable' class
@@ -347,7 +348,7 @@ data RegExp = Literal !String       -- ^ Precisely match the given string
             | Loop  !Int !Int !RegExp -- ^ From @n@ repetitions to @m@ repetitions
             | Union ![RegExp]       -- ^ Union of regular expressions
             | Inter !RegExp !RegExp  -- ^ Intersection of regular expressions
-            deriving (Eq, Ord)
+            deriving (Eq, Ord, G.Data)
 
 -- | With overloaded strings, we can have direct literal regular expressions.
 instance IsString RegExp where
@@ -426,7 +427,7 @@ data SeqOp = SeqConcat    -- ^ See StrConcat
            | SeqPrefixOf  -- ^ See StrPrefixOf
            | SeqSuffixOf  -- ^ See StrSuffixOf
            | SeqReplace   -- ^ See StrReplace
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, G.Data)
 
 -- | Show instance for SeqOp. Again, mapping is important.
 instance Show SeqOp where
@@ -452,7 +453,7 @@ data SetOp = SetEqual
            | SetDifference
            | SetComplement
            | SetHasSize
-        deriving (Eq, Ord)
+        deriving (Eq, Ord, G.Data)
 
 -- The show instance for 'SetOp' is merely for debugging, we map them separately so
 -- the mapped strings are less important here.
@@ -564,7 +565,7 @@ instance Show SBVType where
 
 -- | A symbolic expression
 data SBVExpr = SBVApp !Op ![SV]
-             deriving (Eq, Ord)
+             deriving (Eq, Ord, G.Data)
 
 -- | To improve hash-consing, take advantage of commutative operators by
 -- reordering their arguments.
@@ -1785,7 +1786,7 @@ uncache :: Cached SV -> State -> IO SV
 uncache = uncacheGen rSVCache
 
 -- | An SMT array index is simply an int value
-newtype ArrayIndex = ArrayIndex { unArrayIndex :: Int } deriving (Eq, Ord)
+newtype ArrayIndex = ArrayIndex { unArrayIndex :: Int } deriving (Eq, Ord, G.Data)
 
 -- | We simply show indexes as the underlying integer
 instance Show ArrayIndex where
