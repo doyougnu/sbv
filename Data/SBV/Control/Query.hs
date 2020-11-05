@@ -44,7 +44,7 @@ import qualified Data.IntMap.Strict as IM
 
 import Data.Char     (toLower)
 import Data.Text     (unpack)
-import Data.List     (intercalate, nubBy)
+import Data.List     (intercalate, nubBy, sortOn)
 import Data.Maybe    (listToMaybe, catMaybes)
 import Data.Function (on)
 
@@ -58,7 +58,7 @@ import Data.SBV.Utils.SExpr
 
 import Data.SBV.Control.Types
 import Data.SBV.Control.Utils
-
+import Debug.Trace(trace)
 -- | An Assignment of a model binding
 data Assignment = Assign SVal CV
 
@@ -312,9 +312,9 @@ getModelAtIndex mbi = do
       m@CodeGen           -> error $ "SBV.getModel: Model is not available in mode: " ++ show m
       m@Concrete{}        -> error $ "SBV.getModel: Model is not available in mode: " ++ show m
       SMTMode _ _ isSAT _ -> do
-          !cfg   <- {-# SCC gm_getConfig #-} getConfig
-          !qinps <- {-# SCC gm_getQI #-} getQuantifiedInputs
-          !uis   <- {-# SCC gm_getUI #-} getUIs
+          !cfg   <- getConfig
+          !qinps <- getQuantifiedInputs
+          !uis   <- getUIs
 
            -- for "sat", display the prefix existentials. for "proof", display the prefix universals
           let
@@ -355,7 +355,7 @@ getModelAtIndex mbi = do
           !inputAssocs <- mconcat . mconcat . M.elems <$> mapM (mapM grab) allModelInputs
 
           let --TODO this is a map merge through a list, just do the map merge
-              !assocs    = M.fromList $! obsvs <> M.elems inputAssocs
+              !assocs    = M.fromList $! sortOn fst obsvs <> M.elems inputAssocs
 
 
           -- collect UIs, and UI functions if requested
@@ -388,10 +388,12 @@ getModelAtIndex mbi = do
           uiFunVals <- mapM (\ui@(nm, t) -> (\a -> (nm, (t, a))) <$> getUIFunCVAssoc mbi ui) uiFuns
 
           uiVals    <- mapM (\ui@(nm, _) -> (nm,) <$> getUICVal mbi ui) uiRegs
-
+          trace ("ASSOCS:     " ++ show assocs) $ return ()
+          trace ("UIVALS:     " ++ show uiVals) $ return ()
+          trace ("BINDINGS:     " ++ show bindings) $ return ()
           return SMTModel { modelObjectives = []
                           , modelBindings   = bindings
-                          , modelAssocs     = (M.fromList uiVals) <> assocs
+                          , modelAssocs     = M.fromList uiVals <> assocs
                           , modelUIFuns     = uiFunVals
                           }
 
@@ -797,11 +799,11 @@ mkSMTResult asgns = do
                                     --     - No bindings to vars that are not inputs
                                     let userSS = map fst modelAssignment
                                         invert :: [(Quantifier, [NamedSymVar])] -> [(Quantifier, NamedSymVar)]
-                                        invert = concatMap go
+                                        invert = sort . concatMap go
                                           where go (q, xs) = fmap (q,) xs
 
                                         missing, extra, dup :: [String]
-                                        missing = [getUserName' nm | nm <- ((M.!) inps EX), getSV nm `notElem` userSS]
+                                        missing = [getUserName' nm | nm <- (M.!) inps EX, getSV nm `notElem` userSS]
                                         extra   = [show s | s <- userSS, s `notElem` map (getSV . snd) (invert $ M.toList inps)]
                                         dup     = let walk []     = []
                                                       walk (n:ns)

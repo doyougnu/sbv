@@ -242,7 +242,6 @@ cvToBool x = cvVal x /= CInteger 0
 -- negative values, due to asymmetry. (i.e., an 8-bit negative number represents
 -- values in the range -128 to 127; thus we have to be careful on the negative side.)
 normCV :: CV -> CV
-{-# SCC normCV #-}
 normCV c@(CV (KBounded signed sz) (CInteger v)) = c { cvVal = CInteger norm }
  where norm | sz == 0 = 0
 
@@ -257,10 +256,10 @@ normCV c@(CV (KBounded signed sz) (CInteger v)) = c { cvVal = CInteger norm }
 
                            Below is equivalent, and hopefully faster!
                         -}
-                        v .&. fromIntegral (((1 :: Int) `shiftL` sz) - 1)
-normCV c@(CV KBool (CInteger v)) = let !res = v .&. 1 in
-                                     c { cvVal = CInteger res}
+                        v .&. (((1 :: Integer) `shiftL` sz) - 1)
+normCV c@(CV KBool (CInteger v)) = c { cvVal = CInteger (v .&. 1)}
 normCV c                         = c
+{-# INLINE normCV #-}
 
 -- | Constant False as a 'CV'. We represent it using the integer value 0.
 falseCV :: CV

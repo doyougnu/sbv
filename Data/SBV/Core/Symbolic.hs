@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module    : Data.SBV.Core.Symbolic
@@ -594,7 +593,10 @@ newtype SBVPgm = SBVPgm {pgmAssignments :: S.Seq (SV, SBVExpr)}
 -- | 'NamedSymVar' pairs symbolic values and user given/automatically generated names
 type UserName = T.Text
 data NamedSymVar = NamedSymVar !SV !T.Text
-                 deriving (Eq,Ord,Show,Generic)
+                 deriving (Eq,Show,Generic)
+
+instance Ord NamedSymVar where compare (NamedSymVar l _) (NamedSymVar r _) = compare l r
+
 
 toNamedSV' :: SV -> String -> NamedSymVar
 toNamedSV' s = NamedSymVar s . T.pack
@@ -1027,11 +1029,11 @@ lookupUserInputs (swNodeId -> (NodeId i)) ui = res
                 Nothing -> error "Tried to lookup a user input that doesn't exist!"
                 Just x  -> x
 
-getExistentials :: UserInps -> [(Quantifier, NamedSymVar)]
-getExistentials = IMap.elems . IMap.filter ((==EX) . fst)
+getExistentials :: UserInps -> [NamedSymVar]
+getExistentials = IMap.elems . fmap snd . IMap.filter ((==EX) . fst)
 
-getForAlls :: UserInps -> [(Quantifier, NamedSymVar)]
-getForAlls = IMap.elems . IMap.filter ((==ALL) . fst)
+getForAlls :: UserInps -> [NamedSymVar]
+getForAlls = IMap.elems . fmap snd . IMap.filter ((==ALL) . fst)
 
 inpsToLists :: Inputs -> ([(Quantifier, NamedSymVar)], [NamedSymVar])
 inpsToLists =  (userInpsToList *** internInpsToList) . getInputs
@@ -1056,9 +1058,6 @@ data State  = State { pathCond     :: SVal                             -- ^ kind
                     , rUsedKinds   :: IORef KindSet
                     , rUsedLbls    :: IORef (Set.Set String)
                     , rinps        :: IORef Inputs
-                    -- , rinps        :: !(IORef (([(Quantifier, NamedSymVar)], [NamedSymVar]), Set.Set String)) -- First : User defined, with proper quantifiers
-                                                                                                           -- Second: Internally declared, always existential
-                                                                                                           -- Third : Entire set of names, for faster lookup
                     , rConstraints :: IORef (S.Seq (Bool, [(String, String)], SV))
                     , routs        :: IORef [SV]
                     , rtblMap      :: IORef TableMap
@@ -1338,8 +1337,8 @@ newConst st !c = do
     -- has the kind we asked for, because the constMap stores the full CV
     -- which already has a kind field in it.
     Just !sv -> return sv
-    Nothing -> do (NamedSymVar !sv _) <- newSV st (kindOf c)
-                  let !ins = Map.insert c sv
+    Nothing -> do (NamedSymVar sv _) <- newSV st (kindOf c)
+                  let ins = Map.insert c sv
                   modifyState st rconstMap ins $! modifyIncState st rNewConsts ins
                   return sv
 
@@ -1484,7 +1483,7 @@ svMkSymVarGen isTracker varContext k mbNm st = do
                                   QueryVar       -> (True,  Just EX)
 
             mkS q = do (NamedSymVar sv internalName) <- newSV st k
-                       let nm = fromMaybe (T.unpack internalName) (mbNm)
+                       let nm = fromMaybe (T.unpack internalName) mbNm
                        introduceUserName st (isQueryVar, isTracker) nm k q sv
 
             mkC cv = do registerKind st k
@@ -1565,7 +1564,7 @@ introduceUserName st@State{runMode} (isQueryVar, isTracker) nmOrig k q sv = do
         if isTracker && q == ALL
            then error $ "SBV: Impossible happened! A universally quantified tracker variable is being introduced: " ++ show nm
            else do let newInp olds = case q of
-                                      EX  -> (toNamedSV sv nm) : olds
+                                      EX  -> toNamedSV sv nm : olds
                                       ALL -> noInteractive [ "Adding a new universally quantified variable: "
                                                            , "  Name      : " ++ show nm
                                                            , "  Kind      : " ++ show k

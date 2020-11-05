@@ -723,7 +723,6 @@ getUninterpretedValue s =
 
 -- | Get the value of a term, but in CV form. Used internally. The model-index, in particular is extremely Z3 specific!
 getValueCVHelper :: (MonadIO m, MonadQuery m) => Maybe Int -> SV -> m CV
-{-# SCC getValueCVHelper #-}
 getValueCVHelper mbi s
   | s == trueSV
   = return trueCV
@@ -765,7 +764,7 @@ sexprToVal e = fromCV <$> recoverKindedValue (kindOf (Proxy @a)) e
 -- | Recover a given solver-printed value with a possible interpretation
 recoverKindedValue :: Kind -> SExpr -> Maybe CV
 recoverKindedValue k e = case k of
-                           KBool       | ENum (!i, _) <- e -> Just $! mkConstCV k i
+                           KBool       | ENum (i, _) <- e -> Just $ mkConstCV k i
                                        | True             -> Nothing
 
                            KBounded{}  | ENum (i, _) <- e -> Just $ mkConstCV k i
@@ -1072,24 +1071,19 @@ checkSatUsing cmd = do let bad = unexpected "checkSat" cmd "one of sat/unsat/unk
                                            ECon "delta-sat" -> DSat <$> getPrecision
                                            _                -> bad r Nothing
 
--- | What are the top level inputs? Trackers are returned as top level existentials
 getQuantifiedInputs :: (MonadIO m, MonadQuery m) => m (Map.Map Quantifier [NamedSymVar])
-{-# SCC getQuantifiedInputs #-}
 getQuantifiedInputs = do State{rinps} <- queryState
                          (rQinps, rTrackers) <- liftIO $ getInputs <$> readIORef rinps
 
-                         -- TODO [REVERSAL]: we reverse trackers here and rQinps here
+                         let trackers,preQs,postQs :: Map.Map Quantifier [NamedSymVar]
+                             preQs    = Map.singleton       EX $ getExistentials rQinps
+                             trackers = Map.insertWith (<>) EX (F.toList rTrackers) preQs
+                             postQs   = Map.insert          ALL (getForAlls rQinps) trackers
 
-                         let trackers,preQs,postQs :: [(Quantifier,[NamedSymVar])]
-                             trackers = (EX,) . pure <$> F.toList rTrackers
-                             preQs    = (\(x,y) -> (x,pure y)) <$> getExistentials rQinps
-                             postQs   = (\(x,y) -> (x,pure y)) <$> getForAlls rQinps
-
-                         return $! Map.fromListWith (++) $ preQs <> trackers <> postQs
+                         return (fmap sort postQs)
 
 -- | Get observables, i.e., those explicitly labeled by the user with a call to 'Data.SBV.observe'.
 getObservables :: (MonadIO m, MonadQuery m) => m [(String, CV)]
-{-# SCC getObservables #-}
 getObservables = do State{rObservables} <- queryState
 
                     rObs <- liftIO $ readIORef rObservables
@@ -1106,7 +1100,6 @@ getObservables = do State{rObservables} <- queryState
 -- | Get UIs, both constants and functions. This call returns both the before and after query ones.
 -- | Generalization of 'Data.SBV.Control.getUIs'.
 getUIs :: forall m. (MonadIO m, MonadQuery m) => m [(String, SBVType)]
-{-# SCC getUIs #-}
 getUIs = do State{rUIMap, rIncState} <- queryState
             prior <- io $ readIORef rUIMap
             new   <- io $ readIORef rIncState >>= readIORef . rNewUIs
