@@ -319,22 +319,22 @@ getModelAtIndex mbi = do
            -- for "sat", display the prefix existentials. for "proof", display the prefix universals
           let
             wasSat,wasNotSat,allModelInputs :: M.Map Quantifier [NamedSymVar]
-            -- !wasSat = takeWhile ((/= ALL) . fst) qinps
-            -- !wasNotSat = dropWhile ((/= ALL) . fst) qinps -- takeWhile ((== ALL) . fst) qinps
-            (!wasSat, !wasNotSat) = M.partitionWithKey (\k _ -> k /= ALL) qinps
-            !allModelInputs = if isSAT
-                                then wasSat
-                                else wasNotSat
-
+            (wasSat, wasNotSat) = M.partitionWithKey (\k _ -> k /= ALL) qinps
+            allModelInputs = if isSAT
+                             then wasSat
+                             else wasNotSat
               -- Add on observables only if we're not in a quantified context
-            grabObservables = M.size allModelInputs == M.size qinps -- i.e., we didn't drop anything
+            grabObservables = length (M.elems allModelInputs) == length (M.elems qinps) -- i.e., we didn't drop anything
 
           obsvs <- if grabObservables
                    then getObservables
                    else queryDebug ["*** In a quantified context, obvservables will not be printed."] >> return []
 
-          -- let sortByNodeId :: [(SV, (String, CV))] -> [(String, CV)]
-          --     sortByNodeId = map snd . sortBy (compare `on` (\(SV _ nid, _) -> nid))
+          trace ("ALLMODELINPUTS:     " ++ show allModelInputs) $ return ()
+          trace ("wasSat:     " ++ show wasSat) $ return ()
+          trace ("wasNotSat:     " ++ show wasNotSat) $ return ()
+          trace ("grabObvs:     " ++ show wasNotSat) $ return ()
+          trace ("qinps:     " ++ show qinps) $ return ()
 
           let
             grab :: (MonadIO m, MonadQuery m) => NamedSymVar -> m (M.Map SV (String, CV))
@@ -388,9 +388,7 @@ getModelAtIndex mbi = do
           uiFunVals <- mapM (\ui@(nm, t) -> (\a -> (nm, (t, a))) <$> getUIFunCVAssoc mbi ui) uiFuns
 
           uiVals    <- mapM (\ui@(nm, _) -> (nm,) <$> getUICVal mbi ui) uiRegs
-          trace ("ASSOCS:     " ++ show assocs) $ return ()
-          trace ("UIVALS:     " ++ show uiVals) $ return ()
-          trace ("BINDINGS:     " ++ show bindings) $ return ()
+
           return SMTModel { modelObjectives = []
                           , modelBindings   = bindings
                           , modelAssocs     = M.fromList uiVals <> assocs
@@ -799,7 +797,7 @@ mkSMTResult asgns = do
                                     --     - No bindings to vars that are not inputs
                                     let userSS = map fst modelAssignment
                                         invert :: [(Quantifier, [NamedSymVar])] -> [(Quantifier, NamedSymVar)]
-                                        invert = sort . concatMap go
+                                        invert = concatMap go
                                           where go (q, xs) = fmap (q,) xs
 
                                         missing, extra, dup :: [String]
