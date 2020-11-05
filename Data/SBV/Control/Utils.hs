@@ -81,8 +81,8 @@ import Data.SBV.Core.Symbolic ( IncState(..), withNewIncState, State(..), svToSV
                               , registerLabel, svMkSymVar, validationRequested
                               , isSafetyCheckingIStage, isSetupIStage, isRunIStage, IStage(..), QueryT(..)
                               , extractSymbolicSimulationState, MonadSymbolic(..), newUninterpreted
-                              , NamedSymVar(..),getSV,getUserName', getInputs, getExistentials, getForAlls
-                              , userInps, userInpsToList
+                              , NamedSymVar(..),getSV,getUserName', getInputs
+                              , userInps, uInpsToList, inpsFromListWith, UserInps
                               )
 
 import Data.SBV.Core.AlgReals   (mergeAlgReals, AlgReal(..), RealPoint(..))
@@ -1071,16 +1071,16 @@ checkSatUsing cmd = do let bad = unexpected "checkSat" cmd "one of sat/unsat/unk
                                            ECon "delta-sat" -> DSat <$> getPrecision
                                            _                -> bad r Nothing
 
-getQuantifiedInputs :: (MonadIO m, MonadQuery m) => m (Map.Map Quantifier [NamedSymVar])
+getQuantifiedInputs :: (MonadIO m, MonadQuery m) => m UserInps
 getQuantifiedInputs = do State{rinps} <- queryState
                          (rQinps, rTrackers) <- liftIO $ getInputs <$> readIORef rinps
 
-                         let trackers,preQs,postQs :: Map.Map Quantifier [NamedSymVar]
-                             preQs    = Map.singleton       EX $ getExistentials rQinps
-                             trackers = Map.insertWith (<>) EX (F.toList rTrackers) preQs
-                             postQs   = Map.insert          ALL (getForAlls rQinps) trackers
+                         -- we rely on the nodeId ordering in UserInps to ensure
+                         -- the order of quantifiers
+                         let trackers :: UserInps
+                             trackers = inpsFromListWith (const EX) $ F.toList $ rTrackers
 
-                         return (fmap sort postQs)
+                         return $ rQinps <> trackers
 
 -- | Get observables, i.e., those explicitly labeled by the user with a call to 'Data.SBV.observe'.
 getObservables :: (MonadIO m, MonadQuery m) => m [(String, CV)]
@@ -1116,7 +1116,7 @@ getAllSatResult = do queryDebug ["*** Checking Satisfiability, all solutions.."]
                      topState@State{rUsedKinds} <- queryState
 
                      ki    <- liftIO $ readIORef rUsedKinds
-                     qinps <- getQuantifiedInputs
+                     qinps <- uInpsToList <$> getQuantifiedInputs
 
                      allUninterpreteds <- getUIs
 
@@ -1162,11 +1162,8 @@ getAllSatResult = do queryDebug ["*** Checking Satisfiability, all solutions.."]
 
                        -- TODO [REVERSAL]: convert this to use map operations
                      let allModelInputs :: [(Quantifier, NamedSymVar)]
-                         allModelInputs  = invert $ takeWhile ((/= ALL) . fst) (Map.toList qinps)
+                         allModelInputs  = takeWhile ((/= ALL) . fst) qinps
 
-                         invert :: [(Quantifier, [NamedSymVar])] -> [(Quantifier, NamedSymVar)]
-                         invert = concatMap go
-                           where go (q, xs) = fmap (q,) xs
                          -- Add on observables only if we're not in a quantified context:
                          grabObservables = length allModelInputs == length qinps -- i.e., we didn't drop anything
 
@@ -1182,14 +1179,14 @@ getAllSatResult = do queryDebug ["*** Checking Satisfiability, all solutions.."]
                                 in map mkSVal $ sortByNodeId [nv | (_, nv) <- allModelInputs, not (ignored (getUserName' nv))]
 
                          -- If we have any universals, then the solutions are unique upto prefix existentials.
-                         w = ALL `elem` map fst (Map.toList qinps)
+                         w = ALL `elem` map fst qinps
 
-                     res <- loop grabObservables topState (allUiFuns, uiFuns) allUiRegs (invert $ Map.toList qinps) vars cfg AllSatResult { allSatMaxModelCountReached  = False
-                                                                                                                                          , allSatHasPrefixExistentials = w
-                                                                                                                                          , allSatSolverReturnedUnknown = False
-                                                                                                                                          , allSatSolverReturnedDSat    = False
-                                                                                                                                          , allSatResults               = []
-                                                                                                                                          }
+                     res <- loop grabObservables topState (allUiFuns, uiFuns) allUiRegs qinps vars cfg AllSatResult { allSatMaxModelCountReached  = False
+                                                                                                                                 , allSatHasPrefixExistentials = w
+                                                                                                                                 , allSatSolverReturnedUnknown = False
+                                                                                                                                 , allSatSolverReturnedDSat    = False
+                                                                                                                                 , allSatResults               = []
+                                                                                                                                 }
                      -- results come out in reverse order, so reverse them:
                      pure $ res { allSatResults = reverse (allSatResults res) }
 
@@ -1558,7 +1555,7 @@ executeQuery queryContext (QueryT userQuery) = do
                     case queryContext of
                       QueryInternal -> return ()         -- we're good, internal usages don't mess with scopes
                       QueryExternal -> do
-                        userInps <- userInpsToList . userInps <$> readIORef (rinps st)
+                        userInps <- uInpsToList . userInps <$> readIORef (rinps st)
                         let badInps = reverse [n | (ALL, nm) <- userInps, let n = getUserName' nm]
                         case badInps of
                           [] -> return ()

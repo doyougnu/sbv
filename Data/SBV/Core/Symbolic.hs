@@ -46,10 +46,10 @@ module Data.SBV.Core.Symbolic
   , SBVExpr(..), newExpr, isCodeGenMode, isSafetyCheckingIStage, isRunIStage, isSetupIStage
   , Cached, cache, uncache, modifyState, modifyIncState
   , ArrayIndex(..), FArrayIndex(..), uncacheAI, uncacheFAI
-  , NamedSymVar(..), getSV, getUserName, getUserName'
+  , NamedSymVar(..), getSV, namedSymNodeId, getUserName, getUserName'
   , getSValPathCondition, extendSValPathCondition
   , getTableIndex
-  , Inputs(..), getInputs, userInpsToList, internInpsToList, getExistentials, getForAlls, lookupUserInputs
+  , Inputs(..), UserInps, getInputs, uInpsToList, internInpsToList, getExistentials, getForAlls, lookupUserInputs, inpsFromListWith
   , SBVPgm(..), MonadSymbolic(..), SymbolicT, Symbolic, runSymbolic, State(..), withNewIncState, IncState(..), incrementInternalCounter
   , inSMTMode, SBVRunMode(..), IStage(..), Result(..)
   , registerKind, registerLabel, recordObservable
@@ -90,7 +90,7 @@ import qualified Control.Monad.Writer.Lazy   as LW
 import qualified Control.Monad.Writer.Strict as SW
 import qualified Data.IORef                  as R    (modifyIORef')
 import qualified Data.Generics               as G    (Data(..))
-import qualified Data.IntMap.Strict          as IMap (IntMap, empty, toAscList, lookup, insertWith, insert, elems, filter)
+import qualified Data.IntMap.Strict          as IMap (IntMap, empty, toAscList, lookup, insertWith, insert, elems, filter, fromList)
 import qualified Data.Map.Strict             as Map  (Map, empty, toList, lookup, insert, size)
 import qualified Data.Set                    as Set  (Set, empty, toList, insert, member)
 import qualified Data.Foldable               as F    (toList)
@@ -112,7 +112,7 @@ import Control.Monad.Fail as Fail
 #endif
 
 -- | A symbolic node id
-newtype NodeId = NodeId Int deriving (Eq, Ord, G.Data)
+newtype NodeId = NodeId { getId :: Int } deriving (Eq, Ord, G.Data)
 
 -- | A symbolic word, tracking it's signedness and size.
 data SV = SV !Kind !NodeId
@@ -604,6 +604,9 @@ toNamedSV' s = NamedSymVar s . T.pack
 toNamedSV :: SV -> T.Text -> NamedSymVar
 toNamedSV = NamedSymVar
 
+namedSymNodeId :: NamedSymVar -> NodeId
+namedSymNodeId = swNodeId . getSV
+
 getSV :: NamedSymVar -> SV
 getSV (NamedSymVar s _) = s
 
@@ -1036,12 +1039,16 @@ getForAlls :: UserInps -> [NamedSymVar]
 getForAlls = IMap.elems . fmap snd . IMap.filter ((==ALL) . fst)
 
 inpsToLists :: Inputs -> ([(Quantifier, NamedSymVar)], [NamedSymVar])
-inpsToLists =  (userInpsToList *** internInpsToList) . getInputs
+inpsToLists =  (uInpsToList *** internInpsToList) . getInputs
+
+inpsFromListWith :: (NamedSymVar -> Quantifier) -> [NamedSymVar] -> UserInps
+inpsFromListWith f = IMap.fromList . fmap go
+  where go n = (getId $ namedSymNodeId n, (f n, n))
 
 -- TODO remove these functions once lists have been pushed to edges of code base
 -- | helper functions around inputs
-userInpsToList :: UserInps -> [(Quantifier, NamedSymVar)]
-userInpsToList = IMap.elems
+uInpsToList :: UserInps -> [(Quantifier, NamedSymVar)]
+uInpsToList = IMap.elems
 
 internInpsToList :: InternInps -> [NamedSymVar]
 internInpsToList = Set.toList
