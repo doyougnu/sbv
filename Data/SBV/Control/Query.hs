@@ -58,7 +58,7 @@ import Data.SBV.Utils.SExpr
 
 import Data.SBV.Control.Types
 import Data.SBV.Control.Utils
-import Debug.Trace(trace)
+
 -- | An Assignment of a model binding
 data Assignment = Assign SVal CV
 
@@ -328,9 +328,6 @@ getModelAtIndex mbi = do
           obsvs <- if grabObservables
                    then getObservables
                    else queryDebug ["*** In a quantified context, obvservables will not be printed."] >> return []
-
-          trace ("ALLMODELINPUTS:     " ++ show allModelInputs) $ return ()
-          trace ("qinps:     " ++ show qinps) $ return ()
 
           let
             grab :: (MonadIO m, MonadQuery m) => NamedSymVar -> m (M.Map SV (String, CV))
