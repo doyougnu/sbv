@@ -82,7 +82,7 @@ import Data.SBV.Core.Symbolic ( IncState(..), withNewIncState, State(..), svToSV
                               , isSafetyCheckingIStage, isSetupIStage, isRunIStage, IStage(..), QueryT(..)
                               , extractSymbolicSimulationState, MonadSymbolic(..), newUninterpreted
                               , NamedSymVar(..),getSV,getUserName', getInputs, swNodeId, getId
-                              , userInps, uInpsToList, inpsFromListWith, UserInps
+                              , userInps, uInpsToList, UserInps
                               , prefixExistentials
                               )
 
@@ -1049,7 +1049,7 @@ getQuantifiedInputs = do State{rinps} <- queryState
                          -- we rely on the nodeId ordering in UserInps to ensure
                          -- the order of quantifiers
                          let trackers :: UserInps
-                             trackers = inpsFromListWith (const EX) $ F.toList rTrackers
+                             trackers = (EX, ) <$> rTrackers
 
                          return $ rQinps <> trackers
 

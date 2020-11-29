@@ -53,8 +53,7 @@ import Data.SBV.Core.Data
 import Data.SBV.Core.Symbolic   ( MonadQuery(..), State(..)
                                 , incrementInternalCounter, validationRequested , uInpsToList
                                 , prefixExistentials, prefixUniversals
-                                , swNodeId
-                                -- , namedSymNodeId
+                                , swNodeId, internInps
                                 )
 
 import Data.SBV.Utils.SExpr
@@ -309,8 +308,9 @@ getModel = getModelAtIndex Nothing
 -- | Get a model stored at an index. This is likely very Z3 specific!
 getModelAtIndex :: (MonadIO m, MonadQuery m) => Maybe Int -> m SMTModel
 getModelAtIndex mbi = do
-    State{runMode} <- queryState
+    State{runMode,rinps} <- queryState
     rm <- io $ readIORef runMode
+    inputs <- io $ readIORef rinps
     case rm of
       m@CodeGen           -> error $ "SBV.getModel: Model is not available in mode: " ++ show m
       m@Concrete{}        -> error $ "SBV.getModel: Model is not available in mode: " ++ show m
@@ -321,8 +321,8 @@ getModelAtIndex mbi = do
 
            -- for "sat", display the prefix existentials. for "proof", display the prefix universals
           let allModelInputs = if isSAT
-                               then prefixExistentials qinps
-                               else prefixUniversals   qinps
+                               then ((EX,) <$> internInps inputs) <> prefixExistentials qinps
+                               else prefixUniversals qinps
                -- Add on observables only if we're not in a quantified context
               grabObservables = IM.size allModelInputs == IM.size qinps -- i.e., we didn't drop anything
 

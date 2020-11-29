@@ -978,7 +978,7 @@ withNewIncState st cont = do
 type UserInps = IMap.IntMap (Quantifier, NamedSymVar)
 
 -- | Internally declared, always existential
-type InternInps = Set.Set NamedSymVar
+type InternInps = IMap.IntMap NamedSymVar
 
 -- | Entire set of names, for faster lookup
 type AllInps = Set.Set UserName
@@ -1016,7 +1016,8 @@ onAllInps f inp@Inputs{allInps} = inp{allInps = f allInps}
 addInternInput :: SV -> UserName -> Inputs -> Inputs
 addInternInput sv nm = goAll . goIntern
   where !new = toNamedSV sv nm
-        goIntern = onInternInps (Set.insert new)
+        (NodeId nid) = swNodeId sv
+        goIntern = onInternInps (nid `IMap.insert` new)
         goAll    = onAllInps    (Set.insert nm)
 
 -- | Add a new user input
@@ -1071,7 +1072,7 @@ uInpsToList = IMap.elems
 
 -- | Conversion from internal-inputs to list of named sym vars
 internInpsToList :: InternInps -> [NamedSymVar]
-internInpsToList = Set.toList
+internInpsToList = IMap.elems
 
 -- | The state of the symbolic interpreter
 data State  = State { pathCond     :: SVal                             -- ^ kind KBool
