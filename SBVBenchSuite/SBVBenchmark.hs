@@ -358,7 +358,8 @@ misc = bgroup "Miscellaneous" $ runBenchmark <$> miscBenchmarks
 listBenchmarks :: [Runner]
 listBenchmarks = [ BenchSuite.Lists.BoundedMutex.benchmarks
                  , BenchSuite.Lists.Fibonacci.benchmarks
-                 , BenchSuite.Lists.Nested.benchmarks
+                 -- the nested list benchmark consumes too much memory
+                 -- , BenchSuite.Lists.Nested.benchmarks
                  ]
 
 lists :: Benchmark
