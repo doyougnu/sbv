@@ -314,8 +314,8 @@ svSetEqual sa sb
   where getSet (SVal _ (Left (CV _ (CSet s)))) = Just s
         getSet _                               = Nothing
 
-        r st = do sva <- svToSV st sa
-                  svb <- svToSV st sb
+        r st = do !sva <- svToSV st sa
+                  !svb <- svToSV st sb
                   newExpr st KBool $ SBVApp (SetOp SetEqual) [sva, svb]
 
 -- | Strong equality. Only matters on floats, where it says @NaN@ equals @NaN@ and @+0@ and @-0@ are different.
@@ -336,8 +336,8 @@ svStrongEqual x y
         getD (SVal _ (Left (CV _ (CDouble d)))) = Just d
         getD _                                  = Nothing
 
-        r st = do sx <- svToSV st x
-                  sy <- svToSV st y
+        r st = do !sx <- svToSV st x
+                  !sy <- svToSV st y
                   newExpr st KBool (SBVApp (IEEEFP FP_ObjEqual) [sx, sy])
 
 -- | Less than.
@@ -507,7 +507,7 @@ svExtract i j x@(SVal (KBounded s _) _)
   | True
   = SVal k (Right (cache y))
   where k = KBounded s (i - j + 1)
-        y st = do sv <- svToSV st x
+        y st = do !sv <- svToSV st x
                   newExpr st k (SBVApp (Extract i j) [sv])
 svExtract _ _ _ = error "extract: non-bitvector type"
 
@@ -522,8 +522,8 @@ svJoin x@(SVal (KBounded s i) a) y@(SVal (KBounded _ j) b)
   = SVal k (Right (cache z))
   where
     k = KBounded s (i + j)
-    z st = do xsw <- svToSV st x
-              ysw <- svToSV st y
+    z st = do !xsw <- svToSV st x
+              !ysw <- svToSV st y
               newExpr st k (SBVApp Join [xsw, ysw])
 svJoin _ _ = error "svJoin: non-bitvector type"
 
@@ -653,7 +653,7 @@ svSelect xsOrig err ind = xs `seq` SVal kElt (Right (cache r))
               if all (== swe) sws  -- off-chance that all elts are the same
                  then return swe
                  else do idx <- getTableIndex st kInd kElt sws
-                         swi <- svToSV st ind
+                         !swi <- svToSV st ind
                          let len = length xs
                          -- NB. No need to worry here that the index
                          -- might be < 0; as the SMTLib translation
@@ -670,7 +670,7 @@ svChangeSign s x
     nm = if s then "svSign" else "svUnsign"
 
     k = KBounded s (intSizeOf x)
-    y st = do xsw <- svToSV st x
+    y st = do !xsw <- svToSV st x
               newExpr st k (SBVApp (Extract (intSizeOf x - 1) 0) [xsw])
 
 -- | Convert a symbolic bitvector from unsigned to signed.
@@ -690,7 +690,7 @@ svFromIntegral kTo x
   = result
   where result = SVal kTo (Right (cache y))
         kFrom  = kindOf x
-        y st   = do xsw <- svToSV st x
+        y st   = do !xsw <- svToSV st x
                     newExpr st kTo (SBVApp (KindCast kFrom kTo) [xsw])
 
 --------------------------------------------------------------------------------
@@ -816,8 +816,8 @@ svShift toLeft x i
         -- Regular shift, we know that the shift value fits into the bit-width of x, since it's between 0 and sizeOf x. So, we can just
         -- turn it into a properly sized argument and ship it to SMTLib
         regularShiftValue = SVal kx $ Right $ cache result
-           where result st = do sw1 <- svToSV st x
-                                sw2 <- svToSV st i
+           where result st = do !sw1 <- svToSV st x
+                                !sw2 <- svToSV st i
 
                                 let op | toLeft = Shl
                                        | True   = Shr
@@ -876,8 +876,8 @@ svBarrelRotateRight x i
 barrelRotate :: (SVal -> Int -> SVal) -> SVal -> SVal -> SVal
 barrelRotate f a c = loop blasted a
   where loop :: [(SVal, Integer)] -> SVal -> SVal
-        loop []              acc = acc
-        loop ((b, v) : rest) acc = loop rest (svIte b (f acc (fromInteger v)) acc)
+        loop []              !acc = acc
+        loop ((b, v) : rest) !acc = loop rest (svIte b (f acc (fromInteger v)) acc)
 
         sa = toInteger $ intSizeOf a
         n  = svInteger (kindOf c) sa
@@ -920,8 +920,8 @@ svRotateRight x i
 -- | Overflow detection.
 svMkOverflow :: OvOp -> SVal -> SVal -> SVal
 svMkOverflow o x y = SVal KBool (Right (cache r))
-    where r st = do sx <- svToSV st x
-                    sy <- svToSV st y
+    where r st = do !sx <- svToSV st x
+                    !sy <- svToSV st y
                     newExpr st KBool $ SBVApp (OverflowOp o) [sx, sy]
 
 ---------------------------------------------------------------------------------
@@ -935,15 +935,15 @@ data SArr = SArr (Kind, Kind) (Cached ArrayIndex)
 readSArr :: SArr -> SVal -> SVal
 readSArr (SArr (_, bk) f) a = SVal bk $ Right $ cache r
   where r st = do arr <- uncacheAI f st
-                  i   <- svToSV st a
+                  !i   <- svToSV st a
                   newExpr st bk (SBVApp (ArrRead arr) [i])
 
 -- | Update the element at @a@ to be @b@
 writeSArr :: SArr -> SVal -> SVal -> SArr
 writeSArr (SArr ainfo f) a b = SArr ainfo $ cache g
-  where g st = do arr  <- uncacheAI f st
-                  addr <- svToSV st a
-                  val  <- svToSV st b
+  where g st = do !arr  <- uncacheAI f st
+                  !addr <- svToSV st a
+                  !val  <- svToSV st b
                   amap <- R.readIORef (rArrayMap st)
 
                   let j   = ArrayIndex $ IMap.size amap
@@ -957,9 +957,9 @@ writeSArr (SArr ainfo f) a b = SArr ainfo $ cache g
 -- Merging pushes the if-then-else choice down on to elements
 mergeSArr :: SVal -> SArr -> SArr -> SArr
 mergeSArr t (SArr ainfo a) (SArr _ b) = SArr ainfo $ cache h
-  where h st = do ai <- uncacheAI a st
-                  bi <- uncacheAI b st
-                  ts <- svToSV st t
+  where h st = do !ai <- uncacheAI a st
+                  !bi <- uncacheAI b st
+                  !ts <- svToSV st t
                   amap <- R.readIORef (rArrayMap st)
 
                   let k   = ArrayIndex $ IMap.size amap
@@ -1057,7 +1057,7 @@ readSFunArr (SFunArr (ak, bk) f) address
 
                                             finalValue = find (IMap.toAscList memoTable)
 
-                                        finalSW <- svToSV st finalValue
+                                        !finalSW <- svToSV st finalValue
 
                                         -- Cache the result, so next time we can retrieve it faster if we look it up with the same address!
                                         -- The following line is really the whole point of having caching in SFunArray!
@@ -1178,12 +1178,12 @@ mergeSFunArr t array1@(SFunArr ainfo@(sourceKind, targetKind) a) array2@(SFunArr
                                        -- cache that this key may map to. And creates a new SV that corresponds to the
                                        -- merged value:
                                        gen :: (SVal -> SVal) -> Int -> [(Int, SV)] -> IO SV
-                                       gen mk k choices = svToSV st $ walk choices
+                                       gen mk k choices = svToSV st $! walk choices
                                          where kInfo = (nodeIdToSVal sourceKind k, k `Map.lookup` consts)
 
                                                walk :: [(Int, SV)] -> SVal
-                                               walk []             = mk (fst kInfo)
-                                               walk ((i, v) : ivs) = svIte (svEqualWithConsts (nodeIdToSVal sourceKind i, i `Map.lookup` consts) kInfo)
+                                               walk []               = mk (fst kInfo)
+                                               walk ((!i, !v) : ivs) = svIte (svEqualWithConsts (nodeIdToSVal sourceKind i, i `Map.lookup` consts) kInfo)
                                                                            (swToSVal v)
                                                                            (walk ivs)
 
@@ -1314,8 +1314,8 @@ See http://github.com/LeventErkok/sbv/issues/379 for some further discussion.
 -}
 liftSV2 :: (State -> Kind -> SV -> SV -> IO SV) -> Kind -> SVal -> SVal -> Cached SV
 liftSV2 opS k a b = cache c
-  where c st = do sw1 <- svToSV st a
-                  sw2 <- svToSV st b
+  where c st = do !sw1 <- svToSV st a
+                  !sw2 <- svToSV st b
                   opS st k sw1 sw2
 
 liftSym2 :: (State -> Kind -> SV -> SV -> IO SV)
