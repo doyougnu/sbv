@@ -1263,7 +1263,7 @@ noStringLift2 x y = error $ "Unexpected binary operation called on strings: " ++
 liftSym1 :: (State -> Kind -> SV -> IO SV) -> (AlgReal -> AlgReal) -> (Integer -> Integer) -> (Float -> Float) -> (Double -> Double) -> SVal -> SVal
 liftSym1 _   opCR opCI opCF opCD   (SVal k (Left a)) = SVal k . Left  $! mapCV opCR opCI opCF opCD noCharLift noStringLift noUnint a
 liftSym1 opS _    _    _    _    a@(SVal k _)        = SVal k $ Right $ cache c
-   where c st = do sva <- svToSV st a
+   where c st = do !sva <- svToSV st a
                    opS st k sva
 
 {- A note on constant folding.

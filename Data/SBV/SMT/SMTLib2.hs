@@ -9,6 +9,7 @@
 -- Conversion of symbolic programs to SMTLib format, Using v2 of the standard
 -----------------------------------------------------------------------------
 
+{-# LANGUAGE BangPatterns        #-}
 {-# LANGUAGE PatternGuards       #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ViewPatterns        #-}
@@ -445,13 +446,13 @@ cvtInc inps newKs consts arrs tbls uis (SBVPgm asgnsSeq) cstrs cfg =
 
         declInp (getSV -> s) = "(declare-fun " ++ show s ++ " () " ++ svType s ++ ")"
 
-        (arrayConstants, arrayDelayeds, arraySetups) = unzip3 $ map (declArray cfg False consts skolemMap) arrs
+        (arrayConstants, arrayDelayeds, arraySetups) = unzip3 $! map (declArray cfg False consts skolemMap) arrs
 
-        allTables = [(t, either id id (genTableData rm skolemMap (False, []) (map fst consts) t)) | t <- tbls]
-        (tableDecls, tableAssigns) = unzip $ map constTable allTables
+        allTables = [(t, either id id (genTableData rm skolemMap (False, []) (map fst consts) t)) | !t <- tbls]
+        (tableDecls, tableAssigns) = unzip $! map constTable allTables
 
         tableMap  = IM.fromList $ map mkTable allTables
-          where mkTable (((t, _, _), _), _) = (t, "table" ++ show t)
+          where mkTable (((!t, _, _), _), _) = (t, "table" ++ show t)
 
         -- If we need flattening in models, do emit the required lines if preset
         settings

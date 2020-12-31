@@ -623,7 +623,7 @@ label m x
    | Just _ <- unliteral x = x
    | True                  = SBV $ SVal k $ Right $ cache r
   where k    = kindOf x
-        r st = do xsv <- sbvToSV st x
+        r st = do !xsv <- sbvToSV st x
                   newExpr st k (SBVApp (Label m) [xsv])
 
 

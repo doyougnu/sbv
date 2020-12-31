@@ -331,7 +331,7 @@ mapCV :: (AlgReal             -> AlgReal)
       -> ((Maybe Int, String) -> (Maybe Int, String))
       -> CV
       -> CV
-mapCV r i f d c s u x  = normCV $ CV (kindOf x) $ case cvVal x of
+mapCV r i f d c s u x  = normCV $! CV (kindOf x) $ case cvVal x of
                                                     CAlgReal  a -> CAlgReal  (r a)
                                                     CInteger  a -> CInteger  (i a)
                                                     CFloat    a -> CFloat    (f a)
